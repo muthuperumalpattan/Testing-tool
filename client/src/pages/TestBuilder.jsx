@@ -1,53 +1,117 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, memo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { Save, Play, Plus, Trash2, ArrowLeft, Terminal, Layout, MoveUp, MoveDown, Settings, Code, CheckCircle, Clock, Activity } from 'lucide-react';
+import { Save, Play, Plus, Trash2, ArrowLeft, Terminal, Layout, MoveUp, MoveDown, CheckCircle, Activity, GripVertical, Upload } from 'lucide-react';
 import config from '../config';
+import { useToast } from '../components/ToastProvider';
+import SelectControl from '../components/SelectControl';
+import { ButtonSpinner, BuilderSkeleton } from '../components/Loading';
+import EmptyState from '../components/EmptyState';
+
+const LiveBrowserFrame = memo(function LiveBrowserFrame({ src }) {
+    if (!src) {
+        return (
+            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '1rem', color: 'var(--text-muted)' }}>
+                <div className="spin" style={{ width: '38px', height: '38px', border: '4px solid rgba(99,102,241,0.25)', borderTopColor: 'var(--primary)', borderRadius: '50%' }}></div>
+                <div style={{ fontSize: '0.85rem' }}>Loading test browser…</div>
+            </div>
+        );
+    }
+    return (
+        <iframe
+            title="Test Browser"
+            src={src}
+            style={{ flex: 1, width: '100%', border: 'none', background: '#fff' }}
+            allow="fullscreen; clipboard-read; clipboard-write"
+            referrerPolicy="no-referrer-when-downgrade"
+        />
+    );
+});
 
 const TestBuilder = () => {
     const API_BASE_URL = config.API_BASE_URL;
     const { testId } = useParams();
     const navigate = useNavigate();
+    const { toast, confirm } = useToast();
     const [test, setTest] = useState(null);
     const [steps, setSteps] = useState([]);
     const [loading, setLoading] = useState(true);
+    const [saving, setSaving] = useState(false);
+    const [publishing, setPublishing] = useState(false);
+    const [dirty, setDirty] = useState(false);
     const [running, setRunning] = useState(false);
     const [result, setResult] = useState(null);
-    console.log(testId);
-    useEffect(() => {
-        // Fetch test steps
-        fetch(`${API_BASE_URL}/api/tests/${testId}/steps`)
-            .then(res => res.json())
-            .then(data => {
-                setSteps(data.map(s => ({ type: s.type, payload: JSON.parse(s.payload) })));
-            });
+    const [browserUrl, setBrowserUrl] = useState(null);
+    const [liveOpen, setLiveOpen] = useState(false);
+    const browserUrlRef = useRef(null);
 
-        // Fetch test/project details
-        fetch(`${API_BASE_URL}/api/tests/${testId}`)
-            .then(res => res.json())
-            .then(data => {
-                setTest(data);
-                setLoading(false);
-            });
-    }, [testId]);
+    useEffect(() => {
+        setLoading(true);
+        setDirty(false);
+        Promise.all([
+            fetch(`${API_BASE_URL}/api/tests/${testId}/steps`).then((res) => res.json()),
+            fetch(`${API_BASE_URL}/api/tests/${testId}`).then((res) => res.json()),
+        ])
+            .then(([stepsData, testData]) => {
+                setSteps((stepsData || []).map((s) => ({ type: s.type, payload: JSON.parse(s.payload) })));
+                setTest(testData);
+                setDirty(false);
+            })
+            .catch((err) => {
+                console.error(err);
+                toast.error('Failed to load test details');
+            })
+            .finally(() => setLoading(false));
+    }, [testId, API_BASE_URL]);
+
+    const markDirty = () => setDirty(true);
 
     const addStep = (type) => {
         const newStep = {
             type,
-            payload: type === 'API_REQUEST' ? { method: 'GET', url: '', headers: {}, body: '' } :
+            payload: type === 'OPEN_URL' ? { url: test?.websiteUrl || '', value: '', label: '' } :
+                type === 'API_REQUEST' ? { method: 'GET', url: '', headers: {}, body: '' } :
                 type === 'CLICK' ? { selector: '', strategy: 'css', matchIndex: 1 } :
                     type === 'INPUT' ? { selector: '', value: '', strategy: 'css', matchIndex: 1 } :
+                    type === 'UPLOAD_FILE' ? { selector: '', strategy: 'label', matchIndex: 1, fileName: '', fileType: '', fileData: '' } :
                         type === 'WAIT_FOR' ? { selector: '', strategy: 'css', matchIndex: 1 } :
                             type === 'VALIDATE_STATUS' ? { expectedStatus: 200 } :
                                 type === 'INTERCEPT_API' ? { urlPattern: '', expectedStatus: 200, method: 'ANY' } :
                                     { value: '' }
         };
         setSteps([...steps, newStep]);
+        markDirty();
+    };
+
+    const handleSampleFile = (index, file) => {
+        if (!file) {
+            updateStep(index, { fileName: '', fileType: '', fileData: '', fileSize: 0 });
+            return;
+        }
+        const maxBytes = 5 * 1024 * 1024; // 5 MB
+        if (file.size > maxBytes) {
+            toast.error('Sample file must be 5 MB or smaller');
+            return;
+        }
+        const reader = new FileReader();
+        reader.onload = () => {
+            const result = String(reader.result || '');
+            const base64 = result.includes(',') ? result.split(',')[1] : result;
+            updateStep(index, {
+                fileName: file.name,
+                fileType: file.type || 'application/octet-stream',
+                fileData: base64,
+                fileSize: file.size,
+            });
+        };
+        reader.onerror = () => toast.error('Failed to read the selected file');
+        reader.readAsDataURL(file);
     };
 
     const updateStep = (index, payload) => {
         const newSteps = [...steps];
         newSteps[index].payload = { ...newSteps[index].payload, ...payload };
         setSteps(newSteps);
+        markDirty();
     };
 
     const moveStep = (index, direction) => {
@@ -55,34 +119,129 @@ const TestBuilder = () => {
             const newSteps = [...steps];
             [newSteps[index], newSteps[index - 1]] = [newSteps[index - 1], newSteps[index]];
             setSteps(newSteps);
+            markDirty();
         } else if (direction === 'down' && index < steps.length - 1) {
             const newSteps = [...steps];
             [newSteps[index], newSteps[index + 1]] = [newSteps[index + 1], newSteps[index]];
             setSteps(newSteps);
+            markDirty();
         }
     };
 
     const removeStep = (index) => {
         setSteps(steps.filter((_, i) => i !== index));
+        markDirty();
     };
 
-    const saveTest = () => {
-        fetch(`${API_BASE_URL}/api/tests/${testId}/steps`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ steps })
-        }).then(() => alert('Test saved successfully!'));
+    // Drag & drop reordering
+    const [dragIndex, setDragIndex] = useState(null);
+    const [dragOverIndex, setDragOverIndex] = useState(null);
+    const [dragArmedIndex, setDragArmedIndex] = useState(null);
+
+    const resetDrag = () => {
+        setDragIndex(null);
+        setDragOverIndex(null);
+        setDragArmedIndex(null);
     };
 
-    const publishTest = () => {
-        fetch(`${API_BASE_URL}/api/tests/${testId}/status`, {
+    const handleDrop = (targetIndex) => {
+        if (dragIndex === null || dragIndex === targetIndex) {
+            resetDrag();
+            return;
+        }
+        const newSteps = [...steps];
+        const [moved] = newSteps.splice(dragIndex, 1);
+        newSteps.splice(targetIndex, 0, moved);
+        setSteps(newSteps);
+        markDirty();
+        resetDrag();
+    };
+
+    const saveTest = async (quiet = false) => {
+        setSaving(true);
+        try {
+            const res = await fetch(`${API_BASE_URL}/api/tests/${testId}/steps`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ steps })
+            });
+            if (!res.ok) throw new Error('Failed to save steps');
+            setDirty(false);
+            if (!quiet) toast.success('Test saved successfully');
+            return true;
+        } catch (err) {
+            toast.error(err.message || 'Failed to save test');
+            return false;
+        } finally {
+            setSaving(false);
+        }
+    };
+
+    const resolveStartUrl = () => {
+        const openStep = steps.find((s) => s.type === 'OPEN_URL');
+        const stepUrl = openStep?.payload?.url || openStep?.payload?.value || '';
+        return (stepUrl || test?.websiteUrl || '').trim();
+    };
+
+    const setStatus = async (status) => {
+        const res = await fetch(`${API_BASE_URL}/api/tests/${testId}/status`, {
             method: 'PATCH',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ status: 'Published' })
-        }).then(() => {
-            setTest(prev => ({ ...prev, status: 'Published' }));
-            alert('Test published successfully!');
+            body: JSON.stringify({ status })
         });
+        if (!res.ok) throw new Error(`Failed to set status to ${status}`);
+        setTest((prev) => ({ ...prev, status }));
+    };
+
+    const publishTest = async () => {
+        const isPublished = test?.status === 'Published';
+        if (isPublished) {
+            const ok = await confirm({
+                title: 'Unpublish test?',
+                message: 'This will move the test back to Draft.',
+                confirmText: 'Unpublish',
+                cancelText: 'Cancel',
+                danger: true,
+            });
+            if (!ok) return;
+            setPublishing(true);
+            try {
+                await setStatus('Draft');
+                toast.success('Test unpublished (Draft)');
+            } catch (err) {
+                toast.error(err.message || 'Failed to unpublish');
+            } finally {
+                setPublishing(false);
+            }
+            return;
+        }
+
+        setPublishing(true);
+        try {
+            const saved = await saveTest(true);
+            if (!saved) return;
+            await setStatus('Published');
+            toast.success('Test published successfully');
+        } catch (err) {
+            toast.error(err.message || 'Failed to publish');
+        } finally {
+            setPublishing(false);
+        }
+    };
+
+    const handleBack = async () => {
+        if (dirty) {
+            const ok = await confirm({
+                title: 'Leave without saving?',
+                message: 'You have unsaved changes. Leave this page and discard them?',
+                confirmText: 'Leave',
+                cancelText: 'Stay',
+                danger: true,
+            });
+            if (!ok) return;
+        }
+        if (test?.projectId) navigate(`/projects/${test.projectId}/tests`);
+        else navigate('/projects');
     };
 
     useEffect(() => {
@@ -90,39 +249,45 @@ const TestBuilder = () => {
 
         let cancelled = false;
         let consecutiveErrors = 0;
-        const MAX_ERRORS = 5;       // Stop polling after 5 back-to-back failures
-        const BASE_INTERVAL = 200; // 200ms for ultra-speed near-real-time feed
-        const MAX_INTERVAL = 5000; // cap at 5 s
+        const MAX_ERRORS = 5;
+        const BASE_INTERVAL = 600; // avoid hammering React re-renders (was causing iframe flicker)
+        const MAX_INTERVAL = 5000;
 
         const poll = async () => {
             if (cancelled) return;
 
             try {
                 const res = await fetch(`${API_BASE_URL}/api/tests/${testId}/run-status`, {
-                    signal: AbortSignal.timeout(15000) // 15 s request timeout
+                    signal: AbortSignal.timeout(15000)
                 });
 
                 if (!res.ok) {
-                    // 520 or other server error — back off but keep trying
                     consecutiveErrors++;
                     console.warn(`Poll got ${res.status} (${consecutiveErrors}/${MAX_ERRORS})`);
                 } else {
-                    consecutiveErrors = 0; // reset on success
+                    consecutiveErrors = 0;
                     const data = await res.json();
-                    if (data) {
+                    if (data && !data.waiting) {
                         if (data.finished) {
+                            // Keep the live browser open so the user can review the final screen
                             setRunning(false);
-                            setResult(data);
-                            return; // Stop polling
+                            setResult({ ...data, isLive: false });
+                            return;
                         } else if (data.logs !== undefined || data.snapshots !== undefined || data.liveView !== undefined) {
-                            // Only update if we have actual logs, snapshots or liveView
-                            setResult(prev => ({
-                                ...prev,
-                                logs: data.logs ?? prev?.logs ?? '',
-                                snapshots: data.snapshots ?? prev?.snapshots ?? [],
-                                liveView: data.liveView ?? prev?.liveView,
-                                isLive: true
-                            }));
+                            setResult(prev => {
+                                const nextLogs = data.logs ?? prev?.logs ?? '';
+                                const nextNet = data.networkHistory ?? prev?.networkHistory ?? [];
+                                if (prev?.logs === nextLogs && prev?.isLive &&
+                                    (prev?.networkHistory?.length || 0) === nextNet.length) return prev;
+                                return {
+                                    ...prev,
+                                    logs: nextLogs,
+                                    networkHistory: nextNet,
+                                    snapshots: data.snapshots ?? prev?.snapshots ?? [],
+                                    liveView: data.liveView ?? prev?.liveView,
+                                    isLive: true
+                                };
+                            });
                         }
                     }
                 }
@@ -143,12 +308,10 @@ const TestBuilder = () => {
                 return;
             }
 
-            // Exponential back-off: 4s, 8s, 12s… capped at 20s
             const delay = Math.min(BASE_INTERVAL * (consecutiveErrors + 1), MAX_INTERVAL);
             if (!cancelled) setTimeout(poll, delay);
         };
 
-        // Start first poll after a short delay to let the server kick off the test
         const initialTimer = setTimeout(poll, BASE_INTERVAL);
 
         return () => {
@@ -157,24 +320,46 @@ const TestBuilder = () => {
         };
     }, [running, testId]);
 
+    const closeLiveSession = async () => {
+        setRunning(false);
+        // Navigate iframe to clear-session on backend origin so localStorage/cookies are wiped
+        setBrowserUrl(`${API_BASE_URL}/api/clear-session?t=${Date.now()}`);
+        await new Promise((r) => setTimeout(r, 400));
+        setLiveOpen(false);
+        setBrowserUrl(null);
+        browserUrlRef.current = null;
+    };
+
     const handleRun = async () => {
-        if (!test?.websiteUrl) {
-            alert('Please set a website URL for the test first.');
+        const startUrl = resolveStartUrl();
+        if (!startUrl) {
+            toast.error('Please add an Open URL step (or set the project website URL) before running.');
             return;
         }
 
         setRunning(true);
-        setResult(null);
+        setLiveOpen(true);
+        setResult({ logs: `🚀 Starting test — loading ${startUrl}…`, isLive: true });
 
         try {
-            // Launch the Real Browser Window via Proxy
-            const proxyUrl = `${API_BASE_URL}/api/proxy?url=${encodeURIComponent(test.websiteUrl)}&testId=${testId}`;
-            window.open(proxyUrl, '_blank', 'width=1280,height=720');
+            // Clear any leftover login session from previous runs in the iframe origin
+            setBrowserUrl(`${API_BASE_URL}/api/clear-session?t=${Date.now()}`);
+            await new Promise((r) => setTimeout(r, 500));
 
-            // Still tell the backend to start tracking logs
+            // Always persist current builder steps before run — otherwise DB still has old project steps/URLs
+            await saveTest(true);
+
+            const runId = Date.now();
+            const proxyUrl = `${API_BASE_URL}/api/proxy?url=${encodeURIComponent(startUrl)}&testId=${testId}&runId=${runId}&fresh=1`;
+            browserUrlRef.current = proxyUrl;
+            setBrowserUrl(proxyUrl);
+            setTest((prev) => prev ? { ...prev, websiteUrl: startUrl } : prev);
+
+            // Live mode: only the in-app browser runs steps (no Puppeteer = faster, no flicker)
             await fetch(`${API_BASE_URL}/api/tests/${testId}/run`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' }
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ mode: 'live' })
             });
         } catch (err) {
             console.error('Run error:', err);
@@ -183,7 +368,7 @@ const TestBuilder = () => {
                 finished: true,
                 status: 'Failed'
             });
-            setRunning(true);
+            await closeLiveSession();
         }
     };
 
@@ -193,6 +378,7 @@ const TestBuilder = () => {
                 { id: 'OPEN_URL', label: 'Open URL', icon: <Layout size={14} /> },
                 { id: 'CLICK', label: 'Click Element', icon: <Layout size={14} /> },
                 { id: 'INPUT', label: 'Enter Text', icon: <Layout size={14} /> },
+                { id: 'UPLOAD_FILE', label: 'Upload File', icon: <Upload size={14} /> },
                 { id: 'WAIT_FOR', label: 'Wait for Element', icon: <Layout size={14} /> },
                 { id: 'INTERCEPT_API', label: 'Intercept API', icon: <Activity size={14} /> },
                 { id: 'SCREENSHOT', label: 'Take Screenshot', icon: <Layout size={14} /> }
@@ -208,71 +394,114 @@ const TestBuilder = () => {
         }
     ];
 
+    if (loading) {
+        return <BuilderSkeleton />;
+    }
+
     return (
-        <div style={{ display: 'flex', height: '100vh', padding: '0 1rem' }}>
-            {/* Sidebar Actions */}
-            <div className="glass" style={{ width: '300px', padding: '1.5rem', margin: '1rem 0', display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-                <h3 style={{ fontSize: '1rem' }}>Available Actions</h3>
-                {actions.map(group => (
-                    <div key={group.group}>
-                        <div style={{ fontSize: '0.75rem', fontWeight: 'bold', color: 'var(--text-muted)', marginBottom: '0.75rem', textTransform: 'uppercase' }}>{group.group}</div>
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+        <div className="builder-page">
+            {/* Top bar: back on the left, actions right-aligned */}
+            <div className="builder-header">
+                <div className="builder-header-left">
+                    <button className="lb-back" onClick={handleBack} title="Back to tests">
+                        <ArrowLeft size={20} />
+                    </button>
+                    <div>
+                        <h2>Test Builder</h2>
+                        <div className="builder-header-sub">
+                            <span className={`badge ${test?.status === 'Published' ? 'badge-success' : 'badge-primary'}`} style={{ fontSize: '0.7rem' }}>
+                                {test?.status || 'Draft'}
+                            </span>
+                            {dirty && <span className="badge badge-warning" style={{ fontSize: '0.7rem' }}>Unsaved</span>}
+                            <span>{test?.name}</span>
+                        </div>
+                    </div>
+                </div>
+                <div className="builder-actions">
+                    <button
+                        className={`lb-btn ${test?.status === 'Published' ? 'lb-btn-outline' : 'lb-btn-accent'}`}
+                        onClick={publishTest}
+                        disabled={publishing || saving}
+                    >
+                        {publishing ? <ButtonSpinner /> : <CheckCircle size={17} />}
+                        {publishing ? 'Updating…' : (test?.status === 'Published' ? 'Unpublish' : 'Publish')}
+                    </button>
+                    <button
+                        className="lb-btn lb-btn-outline"
+                        onClick={() => saveTest(false)}
+                        disabled={saving || publishing}
+                    >
+                        {saving ? <ButtonSpinner /> : <Save size={17} />} {saving ? 'Saving…' : 'Save'}
+                    </button>
+                    <button className="lb-btn lb-btn-primary" onClick={handleRun} disabled={running || saving}>
+                        {running ? <ButtonSpinner size={17} /> : <Play size={17} />}
+                        {running ? 'Running...' : 'Run Test'}
+                    </button>
+                </div>
+            </div>
+
+            <div className="builder-body">
+                {/* Left controls */}
+                <aside className="builder-side">
+                    <h3>Available Actions</h3>
+                    {actions.map(group => (
+                        <div key={group.group}>
+                            <div className="builder-side-group">{group.group}</div>
                             {group.items.map(action => (
-                                <button key={action.id} className="btn" style={{ background: 'rgba(255,255,255,0.05)', fontSize: '0.875rem', justifyContent: 'flex-start' }} onClick={() => addStep(action.id)}>
+                                <button key={action.id} className="lb-action" onClick={() => addStep(action.id)}>
                                     {action.icon} {action.label}
                                 </button>
                             ))}
                         </div>
-                    </div>
-                ))}
-            </div>
+                    ))}
+                </aside>
 
-            {/* Main Builder Area */}
-            <div style={{ flex: 1, maxWidth: '65vw', padding: '1rem', display: 'flex', flexDirection: 'column', gap: '1rem', overflowY: 'auto' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
-                        <button className="btn" style={{ background: 'transparent' }} onClick={() => navigate(-1)}><ArrowLeft size={18} /></button>
-                        <div>
-                            <h2 style={{ marginBottom: '0.25rem' }}>Test Builder</h2>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                                <span className={`badge ${test?.status === 'Published' ? 'badge-success' : 'badge-info'}`} style={{ fontSize: '0.7rem' }}>
-                                    {test?.status || 'Draft'}
-                                </span>
-                                <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{test?.name}</span>
-                            </div>
-                        </div>
-                    </div>
-                    <div style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
-                        <button className="btn" style={{ background: 'rgba(59, 130, 246, 0.1)', color: 'var(--primary)' }} onClick={publishTest} disabled={test?.status === 'Published'}>
-                            <CheckCircle size={18} /> {test?.status === 'Published' ? 'Published' : 'Publish'}
-                        </button>
-                        <button className="btn" style={{ background: 'rgba(16, 185, 129, 0.1)', color: 'var(--success)' }} onClick={saveTest}><Save size={18} /> Save</button>
-                        
-                        <button className="btn btn-primary" onClick={handleRun} disabled={running}>
-                            {running ? <Clock size={18} className="spin" /> : <Play size={18} />}
-                            {running ? 'Running...' : 'Run Test'}
-                        </button>
-                    </div>
-                </div>
-
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                {/* Right: steps with drag & drop */}
+                <div className="builder-main">
                     {steps.length === 0 && (
-                        <div className="glass" style={{ padding: '4rem', textAlign: 'center', color: 'var(--text-muted)' }}>
-                            <Plus size={48} style={{ marginBottom: '1rem', opacity: 0.2 }} />
-                            <p>No steps added yet. Choose an action from the sidebar to begin.</p>
+                        <div className="builder-empty">
+                            <EmptyState
+                                icon={<Plus size={40} />}
+                                title="No steps added yet"
+                                description="This test does not contain any steps yet. Choose an action from the left panel to start building your test flow."
+                            />
                         </div>
                     )}
                     {steps.map((step, index) => (
-                        <div key={index} className="glass card" style={{ display: 'flex', gap: '1rem', alignItems: 'flex-start', position: 'relative' }}>
-                            <div style={{ background: 'var(--primary)', color: 'white', width: '24px', height: '24px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.75rem', fontWeight: 'bold' }}>
-                                {index + 1}
-                            </div>
+                        <div
+                            key={index}
+                            className={`step-card${dragIndex === index ? ' dragging' : ''}${dragOverIndex === index && dragIndex !== index ? ' drag-over' : ''}`}
+                            draggable={dragArmedIndex === index}
+                            onDragStart={(e) => {
+                                setDragIndex(index);
+                                e.dataTransfer.effectAllowed = 'move';
+                            }}
+                            onDragEnd={resetDrag}
+                            onDragOver={(e) => {
+                                e.preventDefault();
+                                e.dataTransfer.dropEffect = 'move';
+                                if (dragOverIndex !== index) setDragOverIndex(index);
+                            }}
+                            onDrop={(e) => {
+                                e.preventDefault();
+                                handleDrop(index);
+                            }}
+                        >
+                            <button
+                                className="step-grip"
+                                title="Drag to reorder"
+                                onMouseDown={() => setDragArmedIndex(index)}
+                                onMouseUp={() => setDragArmedIndex(null)}
+                            >
+                                <GripVertical size={18} />
+                            </button>
+                            <div className="step-num">{index + 1}</div>
                             <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '1rem' }}>
                                 <div style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
-                                    <div style={{ fontWeight: 'bold', minWidth: '120px' }}>{step.type.replace('_', ' ')}</div>
+                                    <div className="step-type">{step.type.replace('_', ' ')}</div>
                                     <input
                                         placeholder="Add a label for this step (e.g. 'Enter Email')"
-                                        style={{ flex: 1, height: '32px', fontSize: '0.875rem' }}
+                                        style={{ flex: 1, height: '34px', fontSize: '0.875rem' }}
                                         value={step.payload.label || ''}
                                         onChange={e => updateStep(index, { label: e.target.value })}
                                     />
@@ -280,14 +509,14 @@ const TestBuilder = () => {
                                         <button
                                             onClick={() => moveStep(index, 'up')}
                                             disabled={index === 0}
-                                            style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', cursor: index === 0 ? 'not-allowed' : 'pointer', padding: '4px' }}
+                                            style={{ background: 'transparent', border: 'none', color: 'var(--lb-muted)', cursor: index === 0 ? 'not-allowed' : 'pointer', padding: '4px' }}
                                         >
                                             <MoveUp size={16} />
                                         </button>
                                         <button
                                             onClick={() => moveStep(index, 'down')}
                                             disabled={index === steps.length - 1}
-                                            style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', cursor: index === steps.length - 1 ? 'not-allowed' : 'pointer', padding: '4px' }}
+                                            style={{ background: 'transparent', border: 'none', color: 'var(--lb-muted)', cursor: index === steps.length - 1 ? 'not-allowed' : 'pointer', padding: '4px' }}
                                         >
                                             <MoveDown size={16} />
                                         </button>
@@ -303,14 +532,16 @@ const TestBuilder = () => {
                                     {step.type === 'OPEN_URL' && <input placeholder="URL" value={step.payload.url || ''} onChange={e => updateStep(index, { url: e.target.value })} />}
                                     {['CLICK', 'WAIT_FOR'].includes(step.type) && (
                                         <>
-                                            <select
-                                                style={{ width: '120px' }}
+                                            <SelectControl
+                                                width="160px"
                                                 value={step.payload.strategy || 'css'}
-                                                onChange={e => updateStep(index, { strategy: e.target.value })}
-                                            >
-                                                <option value="css">CSS Selector</option>
-                                                <option value="label">Label Text</option>
-                                            </select>
+                                                onChange={(value) => updateStep(index, { strategy: value })}
+                                                options={[
+                                                    { value: 'css', label: 'CSS Selector' },
+                                                    { value: 'label', label: 'Label Text' },
+                                                ]}
+                                                placeholder="Selector type"
+                                            />
                                             <input
                                                 placeholder={step.payload.strategy === 'label' ? "Label Text (e.g. 'Sign In')" : "Selector (e.g. .btn-primary)"}
                                                 value={step.payload.selector || ''}
@@ -329,14 +560,16 @@ const TestBuilder = () => {
                                     )}
                                     {step.type === 'INPUT' && (
                                         <>
-                                            <select
-                                                style={{ width: '120px' }}
+                                            <SelectControl
+                                                width="160px"
                                                 value={step.payload.strategy || 'css'}
-                                                onChange={e => updateStep(index, { strategy: e.target.value })}
-                                            >
-                                                <option value="css">CSS Selector</option>
-                                                <option value="label">Label Text</option>
-                                            </select>
+                                                onChange={(value) => updateStep(index, { strategy: value })}
+                                                options={[
+                                                    { value: 'css', label: 'CSS Selector' },
+                                                    { value: 'label', label: 'Label Text' },
+                                                ]}
+                                                placeholder="Selector type"
+                                            />
                                             <input
                                                 placeholder={step.payload.strategy === 'label' ? "Label Text (e.g. 'Email')" : "Selector (e.g. [name='email'])"}
                                                 value={step.payload.selector || ''}
@@ -352,6 +585,51 @@ const TestBuilder = () => {
                                                 />
                                             </div>
                                             <input placeholder="Value to enter" value={step.payload.value || ''} onChange={e => updateStep(index, { value: e.target.value })} />
+                                        </>
+                                    )}
+                                    {step.type === 'UPLOAD_FILE' && (
+                                        <>
+                                            <SelectControl
+                                                width="160px"
+                                                value={step.payload.strategy || 'label'}
+                                                onChange={(value) => updateStep(index, { strategy: value })}
+                                                options={[
+                                                    { value: 'css', label: 'CSS Selector' },
+                                                    { value: 'label', label: 'Label Text' },
+                                                ]}
+                                                placeholder="Selector type"
+                                            />
+                                            <input
+                                                placeholder={step.payload.strategy === 'label' ? "Label text (e.g. 'Upload', 'Choose file')" : "Selector (e.g. input[type='file'])"}
+                                                value={step.payload.selector || ''}
+                                                onChange={e => updateStep(index, { selector: e.target.value })}
+                                            />
+                                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                                                <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>M.Index:</span>
+                                                <input
+                                                    type="number"
+                                                    style={{ width: '60px' }}
+                                                    value={step.payload.matchIndex || 1}
+                                                    onChange={e => updateStep(index, { matchIndex: parseInt(e.target.value) || 1 })}
+                                                />
+                                            </div>
+                                            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.45rem', gridColumn: '1 / -1' }}>
+                                                <label style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Sample file to upload</label>
+                                                <input
+                                                    type="file"
+                                                    onChange={(e) => handleSampleFile(index, e.target.files?.[0] || null)}
+                                                />
+                                                {step.payload.fileName ? (
+                                                    <div style={{ fontSize: '0.8rem', color: 'var(--success)' }}>
+                                                        Selected: {step.payload.fileName}
+                                                        {step.payload.fileSize ? ` (${Math.round(step.payload.fileSize / 1024)} KB)` : ''}
+                                                    </div>
+                                                ) : (
+                                                    <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+                                                        Pick a sample file (max 5 MB). It is stored with the test and used during the live run.
+                                                    </div>
+                                                )}
+                                            </div>
                                         </>
                                     )}
                                     {['GET', 'POST', 'PUT', 'DELETE'].includes(step.type) && (
@@ -387,17 +665,19 @@ const TestBuilder = () => {
                                                 value={step.payload.urlPattern || ''}
                                                 onChange={e => updateStep(index, { urlPattern: e.target.value })}
                                             />
-                                            <select
-                                                style={{ width: '100px' }}
+                                            <SelectControl
+                                                width="130px"
                                                 value={step.payload.method || 'ANY'}
-                                                onChange={e => updateStep(index, { method: e.target.value })}
-                                            >
-                                                <option value="ANY">ANY</option>
-                                                <option value="GET">GET</option>
-                                                <option value="POST">POST</option>
-                                                <option value="PUT">PUT</option>
-                                                <option value="DELETE">DELETE</option>
-                                            </select>
+                                                onChange={(value) => updateStep(index, { method: value })}
+                                                options={[
+                                                    { value: 'ANY', label: 'ANY' },
+                                                    { value: 'GET', label: 'GET' },
+                                                    { value: 'POST', label: 'POST' },
+                                                    { value: 'PUT', label: 'PUT' },
+                                                    { value: 'DELETE', label: 'DELETE' },
+                                                ]}
+                                                placeholder="Method"
+                                            />
                                             <input
                                                 type="number"
                                                 placeholder="Expected Status"
@@ -411,57 +691,121 @@ const TestBuilder = () => {
                             </div>
                         </div>
                     ))}
-                </div>
 
-                {running && (
-                    <div style={{ position: 'fixed', top: 0, left: 0, width: '100%', height: '100%', background: 'rgba(0,0,0,0.9)', zIndex: 2000, display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: '2rem' }}>
-                        <div className="glass" style={{ width: '90%', maxWidth: '1200px', height: '80%', display: 'flex', flexDirection: 'column', overflow: 'hidden', border: '2px solid var(--primary)', borderRadius: '16px', boxShadow: '0 0 50px rgba(79, 70, 229, 0.4)' }}>
-                            <div style={{ background: 'rgba(255,255,255,0.05)', padding: '0.75rem 1.5rem', display: 'flex', alignItems: 'center', gap: '1rem', borderBottom: '1px solid var(--border)' }}>
-                                <div style={{ display: 'flex', gap: '0.5rem' }}>
-                                    <div style={{ width: '12px', height: '12px', borderRadius: '50%', background: '#ff5f56' }}></div>
-                                    <div style={{ width: '12px', height: '12px', borderRadius: '50%', background: '#ffbd2e' }}></div>
-                                    <div style={{ width: '12px', height: '12px', borderRadius: '50%', background: '#27c93f' }}></div>
-                                </div>
-                                <div style={{ flex: 1, background: 'rgba(0,0,0,0.3)', padding: '0.25rem 1rem', borderRadius: '6px', fontSize: '0.875rem', color: 'var(--text-muted)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                    <span>
-                                        {localStorage.getItem('API_URL_OVERRIDE') ? '🏠 Home Desktop Monitor' : (window.location.hostname === 'localhost' ? '🏠 Local Automation Monitor' : '☁️ Live Cloud Monitor')} 
-                                        - Running Test #{testId}
-                                    </span>
-                                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                                        <div className="spin" style={{ width: '10px', height: '10px', border: '2px solid var(--primary)', borderTopColor: 'transparent', borderRadius: '50%' }}></div>
-                                        <span style={{ fontSize: '0.75rem' }}>EXECUTING...</span>
-                                    </div>
+                {liveOpen && (
+                    <div style={{ position: 'fixed', inset: 0, background: '#0b1220', zIndex: 2000, display: 'flex', flexDirection: 'column' }}>
+                        {/* Full-page monitor header */}
+                        <div style={{ background: 'rgba(255,255,255,0.05)', padding: '0.6rem 1.25rem', display: 'flex', alignItems: 'center', gap: '1rem', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
+                            <div style={{ display: 'flex', gap: '0.5rem' }}>
+                                <div style={{ width: '12px', height: '12px', borderRadius: '50%', background: '#ff5f56' }}></div>
+                                <div style={{ width: '12px', height: '12px', borderRadius: '50%', background: '#ffbd2e' }}></div>
+                                <div style={{ width: '12px', height: '12px', borderRadius: '50%', background: '#27c93f' }}></div>
+                            </div>
+                            <div style={{ flex: 1, background: 'rgba(0,0,0,0.3)', padding: '0.35rem 1rem', borderRadius: '6px', fontSize: '0.875rem', color: 'var(--text-muted)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', minWidth: 0 }}>
+                                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                    {localStorage.getItem('API_URL_OVERRIDE') ? '🏠 Home Desktop Monitor' : (window.location.hostname === 'localhost' ? '🏠 Local Automation Monitor' : '☁️ Live Cloud Monitor')} 
+                                    - Test #{testId} — {resolveStartUrl() || test?.websiteUrl || '—'}
+                                </span>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexShrink: 0 }}>
+                                    {running ? (
+                                        <>
+                                            <div className="spin" style={{ width: '10px', height: '10px', border: '2px solid var(--primary)', borderTopColor: 'transparent', borderRadius: '50%' }}></div>
+                                            <span style={{ fontSize: '0.75rem' }}>EXECUTING...</span>
+                                        </>
+                                    ) : (
+                                        <span style={{ fontSize: '0.75rem', color: 'var(--success)' }}>FINISHED — review the page, then close</span>
+                                    )}
                                 </div>
                             </div>
-                            <div style={{ flex: 1, display: 'flex', position: 'relative', overflow: 'hidden', background: '#000' }}>
-                                {/* Execution Logs */}
-                                <div style={{ flex: 1, padding: '1.5rem', overflowY: 'auto' }}>
-                                    <div style={{ marginBottom: '1.5rem', padding: '1rem', background: 'rgba(59, 130, 246, 0.1)', border: '1px solid rgba(59, 130, 246, 0.2)', borderRadius: '8px', display: 'flex', alignItems: 'center', gap: '1rem' }}>
-                                        <div className="spin" style={{ width: '24px', height: '24px', border: '3px solid var(--primary)', borderTopColor: 'transparent', borderRadius: '50%' }}></div>
-                                        <div>
-                                            <div style={{ fontWeight: 'bold', color: 'var(--primary)' }}>Real Browser Window Active!</div>
-                                            <div style={{ fontSize: '0.8rem', opacity: 0.7 }}>Automation is running in the new tab. Don't close it until finished.</div>
+                            <button
+                                className="btn"
+                                style={{ background: 'var(--error)', color: '#fff', padding: '0.5rem 1.1rem', flexShrink: 0 }}
+                                onClick={closeLiveSession}
+                            >
+                                {running ? 'Stop Session' : 'Close Browser'}
+                            </button>
+                        </div>
+
+                        <div style={{ flex: 1, display: 'flex', overflow: 'hidden', background: '#000' }}>
+                            {/* Live proxied browser — fills the whole left area */}
+                            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', borderRight: '1px solid rgba(255,255,255,0.1)', minWidth: 0 }}>
+                                <LiveBrowserFrame src={browserUrl} />
+                            </div>
+
+                            {/* Execution Logs — compact right panel */}
+                            <div style={{ width: '320px', flexShrink: 0, padding: '1rem', overflowY: 'auto', background: '#0b1220' }}>
+                                <div style={{ marginBottom: '1rem', padding: '0.75rem', background: running ? 'rgba(59, 130, 246, 0.1)' : 'rgba(16, 185, 129, 0.1)', border: running ? '1px solid rgba(59, 130, 246, 0.2)' : '1px solid rgba(16, 185, 129, 0.3)', borderRadius: '8px', display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                                    {running ? (
+                                        <div className="spin" style={{ width: '20px', height: '20px', border: '3px solid var(--primary)', borderTopColor: 'transparent', borderRadius: '50%', flexShrink: 0 }}></div>
+                                    ) : (
+                                        <CheckCircle size={20} color="var(--success)" style={{ flexShrink: 0 }} />
+                                    )}
+                                    <div>
+                                        <div style={{ fontWeight: 'bold', fontSize: '0.85rem', color: running ? 'var(--primary)' : 'var(--success)' }}>
+                                            {running ? 'Live run in progress' : 'Run finished'}
+                                        </div>
+                                        <div style={{ fontSize: '0.72rem', opacity: 0.7 }}>
+                                            {running ? 'Watch typing & clicks on the left.' : 'Close when you are done reviewing.'}
                                         </div>
                                     </div>
-
-                                    <h3 style={{ fontSize: '0.875rem', textTransform: 'uppercase', letterSpacing: '0.1em', color: 'var(--text-muted)', marginBottom: '1rem' }}>Execution Logs</h3>
-                                    <div style={{ fontFamily: 'monospace', fontSize: '0.875rem', lineHeight: '1.5', whiteSpace: 'pre-wrap' }}>
-                                        {result?.logs ? result.logs.split('\n').map((log, i) => (
-                                            <div key={i} style={{ marginBottom: '0.5rem', borderLeft: '2px solid var(--primary)', paddingLeft: '0.75rem', color: 'rgba(255,255,255,0.9)' }}>{log}</div>
-                                        )) : (
-                                            <div className="blink" style={{ color: 'var(--primary)' }}>_ [WAITING...]</div>
-                                        )}
-                                        <div ref={el => el?.scrollIntoView({ behavior: 'smooth' })}></div>
-                                    </div>
                                 </div>
+
+                                <h3 style={{ fontSize: '0.8rem', textTransform: 'uppercase', letterSpacing: '0.1em', color: 'var(--text-muted)', marginBottom: '0.75rem' }}>Execution Logs</h3>
+                                <div style={{ fontFamily: 'monospace', fontSize: '0.78rem', lineHeight: '1.45', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                                    {result?.logs ? result.logs.split('\n').map((log, i) => (
+                                        <div key={i} style={{ marginBottom: '0.45rem', borderLeft: '2px solid var(--primary)', paddingLeft: '0.6rem', color: 'rgba(255,255,255,0.9)' }}>{log}</div>
+                                    )) : (
+                                        <div style={{ color: 'var(--primary)' }}>_ [WAITING...]</div>
+                                    )}
+                                </div>
+
+                                {(() => {
+                                    const assetRe = /\.(js|mjs|css|png|jpe?g|gif|svg|ico|woff2?|ttf|map)(\?|$)/i;
+                                    const base = (test?.apiBaseUrl || '').trim();
+                                    const all = (result?.networkHistory || []).filter((c) => !assetRe.test(String(c.url || '')));
+                                    const matched = base ? all.filter((c) => String(c.url || '').toLowerCase().includes(base.toLowerCase())) : all;
+                                    const calls = matched.length > 0 ? matched : all;
+                                    if (calls.length === 0) return null;
+
+                                    const methodColor = (m) =>
+                                        m === 'GET' ? '#38bdf8' : m === 'POST' ? '#a78bfa' : m === 'DELETE' ? '#f87171' : '#fbbf24';
+                                    const statusColor = (s) =>
+                                        !s ? '#fbbf24' : s >= 400 ? '#f87171' : '#34d399';
+
+                                    return (
+                                        <div style={{ marginTop: '1.5rem' }}>
+                                            <h3 style={{ fontSize: '0.8rem', textTransform: 'uppercase', letterSpacing: '0.1em', color: 'var(--text-muted)', marginBottom: '0.6rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                                                <Activity size={14} color="var(--primary)" /> API Calls
+                                                <span style={{ background: 'rgba(99,102,241,0.2)', color: 'var(--primary)', borderRadius: '999px', padding: '0.05rem 0.5rem', fontSize: '0.7rem', letterSpacing: 0 }}>{calls.length}</span>
+                                            </h3>
+
+                                            {base && (
+                                                <div style={{ marginBottom: '0.75rem', padding: '0.55rem 0.7rem', background: 'rgba(99,102,241,0.08)', border: '1px solid rgba(99,102,241,0.25)', borderRadius: '8px' }}>
+                                                    <div style={{ fontSize: '0.62rem', textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--text-muted)', marginBottom: '0.2rem' }}>Base API URL</div>
+                                                    <div style={{ fontSize: '0.75rem', fontFamily: 'monospace', color: '#c7d2fe', wordBreak: 'break-all' }}>{base}</div>
+                                                </div>
+                                            )}
+
+                                            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.45rem' }}>
+                                                {calls.map((c, i) => {
+                                                    let path = c.url;
+                                                    try { path = new URL(c.url, window.location.origin).pathname; } catch (e) { /* keep raw */ }
+                                                    return (
+                                                        <div key={i} title={c.url} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.45rem 0.6rem', background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.07)', borderRadius: '8px' }}>
+                                                            <span style={{ fontSize: '0.62rem', fontWeight: 700, color: methodColor(c.method), width: '44px', flexShrink: 0 }}>{c.method}</span>
+                                                            <span style={{ flex: 1, fontSize: '0.7rem', fontFamily: 'monospace', color: 'rgba(255,255,255,0.85)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 }}>{path}</span>
+                                                            <span style={{ fontSize: '0.68rem', fontWeight: 700, color: statusColor(c.status), display: 'flex', alignItems: 'center', gap: '0.3rem', flexShrink: 0 }}>
+                                                                <span style={{ width: '7px', height: '7px', borderRadius: '50%', background: statusColor(c.status), boxShadow: `0 0 6px ${statusColor(c.status)}` }}></span>
+                                                                {c.status || '…'}
+                                                            </span>
+                                                        </div>
+                                                    );
+                                                })}
+                                            </div>
+                                        </div>
+                                    );
+                                })()}
                             </div>
-                        </div>
-                        <div style={{ textAlign: 'center' }}>
-                            <p style={{ color: 'var(--primary)', fontWeight: 'bold' }}>
-                                🚀 A real Google Chrome browser has been opened for testing!
-                            </p>
-                            <p style={{ color: 'var(--text-muted)' }}>Watch the native executions securely from Pattanhub.</p>
-                            <button className="btn" style={{ marginTop: '1rem', background: 'var(--error)' }} onClick={() => setRunning(false)}>Stop Session</button>
                         </div>
                     </div>
                 )}
@@ -540,12 +884,12 @@ const TestBuilder = () => {
                                                         </td>
                                                         <td style={{ padding: '0.75rem 1rem', textAlign: 'center' }}>
                                                             {item.payload ? (
-                                                                <button className="btn" style={{ padding: '0.4rem 0.75rem', fontSize: '0.75rem', background: 'rgba(255,255,255,0.1)', border: '1px solid rgba(255,255,255,0.2)' }} onClick={() => alert(item.payload)}>View Data</button>
+                                                                <button className="btn" style={{ padding: '0.4rem 0.75rem', fontSize: '0.75rem', background: 'rgba(255,255,255,0.1)', border: '1px solid rgba(255,255,255,0.2)' }} onClick={() => toast.info(typeof item.payload === 'string' ? item.payload : JSON.stringify(item.payload, null, 2), 8000)}>View Data</button>
                                                             ) : <span style={{ color: 'var(--text-muted)', fontSize: '0.75rem' }}>None</span>}
                                                         </td>
                                                         <td style={{ padding: '0.75rem 1rem', textAlign: 'center' }}>
                                                             {item.responseBody ? (
-                                                                <button className="btn btn-primary" style={{ padding: '0.4rem 0.75rem', fontSize: '0.75rem', boxShadow: '0 4px 15px rgba(0,0,0,0.3)' }} onClick={() => alert(item.responseBody)}>View Body</button>
+                                                                <button className="btn btn-primary" style={{ padding: '0.4rem 0.75rem', fontSize: '0.75rem', boxShadow: '0 4px 15px rgba(0,0,0,0.3)' }} onClick={() => toast.info(typeof item.responseBody === 'string' ? item.responseBody : JSON.stringify(item.responseBody, null, 2), 8000)}>View Body</button>
                                                             ) : <span style={{ color: 'var(--text-muted)', fontSize: '0.75rem' }}>No Data</span>}
                                                         </td>
                                                     </tr>
@@ -557,6 +901,7 @@ const TestBuilder = () => {
                         )}
                     </div>
                 )}
+                </div>
             </div>
         </div>
     );

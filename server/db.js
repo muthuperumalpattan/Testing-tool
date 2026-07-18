@@ -35,8 +35,11 @@ const initDb = async () => {
                 name TEXT,
                 "websiteUrl" TEXT,
                 "apiBaseUrl" TEXT,
-                description TEXT
+                description TEXT,
+                "ownerId" INTEGER
             );
+
+            ALTER TABLE projects ADD COLUMN IF NOT EXISTS "ownerId" INTEGER;
 
             CREATE TABLE IF NOT EXISTS test_cases (
                 id SERIAL PRIMARY KEY,
@@ -69,12 +72,18 @@ const initDb = async () => {
             );
         `);
 
-        // Seed default users if not exists
+        // Seed default users if not exists (passwords stored as plain text by request)
         const res = await client.query('SELECT * FROM users WHERE username = $1', ['admin']);
         if (res.rows.length === 0) {
             await client.query('INSERT INTO users (username, password, role) VALUES ($1, $2, $3)', ['admin', 'admin123', 'Admin']);
             await client.query('INSERT INTO users (username, password, role) VALUES ($1, $2, $3)', ['tester', 'tester123', 'Tester']);
             console.log('Default users seeded.');
+        } else {
+            // Ensure tester exists even if admin already does
+            const tester = await client.query('SELECT id FROM users WHERE username = $1', ['tester']);
+            if (tester.rows.length === 0) {
+                await client.query('INSERT INTO users (username, password, role) VALUES ($1, $2, $3)', ['tester', 'tester123', 'Tester']);
+            }
         }
     } finally {
         client.release();

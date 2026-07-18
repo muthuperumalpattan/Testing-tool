@@ -1,33 +1,45 @@
 import React, { useState, useEffect } from 'react';
-import { BrowserRouter as Router, Routes, Route, Navigate, Link, useNavigate } from 'react-router-dom';
-import { LayoutDashboard, FolderKanban, PlayCircle, History, Settings, LogOut, Plus, ChevronRight, Activity, CheckCircle2, XCircle, Clock } from 'lucide-react';
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, AreaChart, Area } from 'recharts';
+import { BrowserRouter as Router, Routes, Route, Navigate, NavLink, Link, useNavigate } from 'react-router-dom';
+import { LayoutDashboard, FolderKanban, LogOut, Activity, CheckCircle2, Users as UsersIcon, UserPlus } from 'lucide-react';
+import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
 
 import Projects from './pages/Projects';
 import Tests from './pages/Tests';
 import TestBuilder from './pages/TestBuilder';
+import Users from './pages/Users';
 import config from './config';
-// import History from './pages/History';
-// import TestRunner from './pages/TestRunner';
+import { useToast } from './components/ToastProvider';
+import { ButtonSpinner, DashboardSkeleton } from './components/Loading';
+
 const Sidebar = ({ user, logout }) => (
-  <aside className="glass" style={{ width: '260px', height: '100vh', padding: '2rem', display: 'flex', flexDirection: 'column', gap: '2rem', position: 'fixed' }}>
+  <aside className="glass" style={{ width: '260px', height: '100vh', padding: '2rem', display: 'flex', flexDirection: 'column', gap: '2rem', position: 'fixed', zIndex: 20 }}>
     <div style={{ fontSize: '1.5rem', fontWeight: '800', color: 'var(--primary)', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
       <Activity size={32} /> NoCodeTest
     </div>
 
     <nav style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', flex: 1 }}>
-      <Link to="/" className="btn" style={{ justifyContent: 'flex-start', background: 'transparent', color: 'var(--text-main)' }}>
+      <NavLink
+        to="/"
+        end
+        className={({ isActive }) => `btn ${isActive ? 'nav-link-active' : ''}`}
+        style={{ justifyContent: 'flex-start', background: 'transparent', color: 'var(--text-main)' }}
+      >
         <LayoutDashboard size={20} /> Dashboard
-      </Link>
-      <Link to="/projects" className="btn" style={{ justifyContent: 'flex-start', background: 'transparent', color: 'var(--text-main)' }}>
+      </NavLink>
+      <NavLink
+        to="/projects"
+        className={({ isActive }) => `btn ${isActive ? 'nav-link-active' : ''}`}
+        style={{ justifyContent: 'flex-start', background: 'transparent', color: 'var(--text-main)' }}
+      >
         <FolderKanban size={20} /> Projects
-      </Link>
-      {/* <Link to="/runner" className="btn" style={{ justifyContent: 'flex-start', background: 'transparent', color: 'var(--text-main)' }}>
-        <PlayCircle size={20} /> Test Runner
-      </Link>
-      <Link to="/history" className="btn" style={{ justifyContent: 'flex-start', background: 'transparent', color: 'var(--text-main)' }}>
-        <History size={20} /> History
-      </Link> */}
+      </NavLink>
+      <NavLink
+        to="/users"
+        className={({ isActive }) => `btn ${isActive ? 'nav-link-active' : ''}`}
+        style={{ justifyContent: 'flex-start', background: 'transparent', color: 'var(--text-main)' }}
+      >
+        <UsersIcon size={20} /> Users
+      </NavLink>
     </nav>
 
     <div style={{ marginTop: 'auto', borderTop: '1px solid var(--border)', paddingTop: '1rem' }}>
@@ -42,31 +54,33 @@ const Sidebar = ({ user, logout }) => (
   </aside>
 );
 
-const Navbar = ({ title }) => (
-  <header style={{ marginLeft: '260px', padding: '1.5rem 2rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--border)' }}>
-    <h1 style={{ fontSize: '1.25rem' }}>{title}</h1>
-    <div style={{ display: 'flex', gap: '1rem' }}>
-      <button className="btn btn-primary"><Plus size={18} /> New Project</button>
-    </div>
-  </header>
-);
-
-// Pages
 const LoginPage = ({ setAuth }) => {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
+  const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
+  const { toast } = useToast();
 
-  const handleLogin = (e) => {
+  const handleLogin = async (e) => {
     e.preventDefault();
-    // In a real app, this would be an API call
-    if ((username === 'admin' && password === 'admin123') || (username === 'tester' && password === 'tester123')) {
-      const user = { username, role: username === 'admin' ? 'Admin' : 'Tester' };
-      localStorage.setItem('user', JSON.stringify(user));
-      setAuth(user);
+    setLoading(true);
+    try {
+      const res = await fetch(`${config.API_BASE_URL}/api/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, password }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || 'Invalid credentials');
+
+      localStorage.setItem('user', JSON.stringify(data));
+      setAuth(data);
+      toast.success(`Welcome, ${data.username}`);
       navigate('/');
-    } else {
-      alert('Invalid credentials');
+    } catch (err) {
+      toast.error(err.message || 'Invalid credentials');
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -80,7 +94,101 @@ const LoginPage = ({ setAuth }) => {
         </div>
         <input type="text" placeholder="Username" value={username} onChange={e => setUsername(e.target.value)} required />
         <input type="password" placeholder="Password" value={password} onChange={e => setPassword(e.target.value)} required />
-        <button type="submit" className="btn btn-primary" style={{ justifyContent: 'center' }}>Sign In</button>
+        <button type="submit" className="btn btn-primary" style={{ justifyContent: 'center' }} disabled={loading}>
+          {loading && <ButtonSpinner />}
+          {loading ? 'Signing in…' : 'Sign In'}
+        </button>
+        <div style={{ textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.9rem' }}>
+          New employee?{' '}
+          <Link to="/signup" style={{ color: 'var(--primary)', fontWeight: 700 }}>
+            Create an account
+          </Link>
+        </div>
+      </form>
+    </div>
+  );
+};
+
+const SignupPage = () => {
+  const [form, setForm] = useState({ username: '', password: '', confirmPassword: '' });
+  const [loading, setLoading] = useState(false);
+  const navigate = useNavigate();
+  const { toast } = useToast();
+
+  const handleSignup = async (event) => {
+    event.preventDefault();
+    if (form.password !== form.confirmPassword) {
+      toast.error('Passwords do not match');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const res = await fetch(`${config.API_BASE_URL}/api/signup`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: form.username, password: form.password }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || 'Unable to create account');
+
+      toast.success('Employee account created. You can sign in now.');
+      navigate('/login');
+    } catch (err) {
+      toast.error(err.message || 'Unable to create account');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '2rem' }}>
+      <form onSubmit={handleSignup} className="glass" style={{ width: '430px', padding: '3rem', display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+        <div style={{ textAlign: 'center' }}>
+          <UserPlus size={48} color="var(--primary)" style={{ marginBottom: '1rem' }} />
+          <h2>Employee Sign Up</h2>
+          <p style={{ color: 'var(--text-muted)' }}>Create an employee account</p>
+        </div>
+        <input
+          type="text"
+          placeholder="Username"
+          autoComplete="username"
+          value={form.username}
+          onChange={(event) => setForm({ ...form, username: event.target.value })}
+          minLength={3}
+          required
+        />
+        <input
+          type="password"
+          placeholder="Password"
+          autoComplete="new-password"
+          value={form.password}
+          onChange={(event) => setForm({ ...form, password: event.target.value })}
+          minLength={6}
+          required
+        />
+        <input
+          type="password"
+          placeholder="Confirm password"
+          autoComplete="new-password"
+          value={form.confirmPassword}
+          onChange={(event) => setForm({ ...form, confirmPassword: event.target.value })}
+          minLength={6}
+          required
+        />
+        <div className="glass" style={{ padding: '0.75rem 1rem', color: 'var(--text-muted)', fontSize: '0.85rem' }}>
+          Account role: <strong style={{ color: 'var(--text-main)' }}>Employee</strong>
+        </div>
+        <button type="submit" className="btn btn-primary" style={{ justifyContent: 'center' }} disabled={loading}>
+          {loading && <ButtonSpinner />}
+          {loading ? 'Creating account…' : 'Create Employee Account'}
+        </button>
+        <div style={{ textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.9rem' }}>
+          Already registered?{' '}
+          <Link to="/login" style={{ color: 'var(--primary)', fontWeight: 700 }}>
+            Sign in
+          </Link>
+        </div>
       </form>
     </div>
   );
@@ -95,9 +203,19 @@ const Dashboard = () => {
     apiSuccessRate: 0,
     lastRun: 'Never'
   });
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetch(`${config.API_BASE_URL}/api/stats`).then(res => res.json()).then(setStats).catch(console.error);
+    let user = null;
+    try { user = JSON.parse(localStorage.getItem('user')); } catch { /* ignore */ }
+    const query = user?.id != null
+      ? `?userId=${encodeURIComponent(user.id)}&role=${encodeURIComponent(user.role || '')}`
+      : '';
+    fetch(`${config.API_BASE_URL}/api/stats${query}`)
+      .then(res => res.json())
+      .then(setStats)
+      .catch(console.error)
+      .finally(() => setLoading(false));
   }, []);
 
   const chartData = [
@@ -109,6 +227,10 @@ const Dashboard = () => {
     { name: 'Sat', tests: 45 },
     { name: 'Sun', tests: 90 },
   ];
+
+  if (loading) {
+    return <DashboardSkeleton />;
+  }
 
   return (
     <div style={{ padding: '2rem' }}>
@@ -155,12 +277,10 @@ const Dashboard = () => {
           <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', padding: '1rem 0', borderBottom: '1px solid var(--border)' }}>
             <div className="badge badge-success"><CheckCircle2 size={14} /></div>
             <div style={{ flex: 1 }}>
-              <div style={{ fontWeight: '600' }}>API: Login Authentication</div>
-              <div style={{ fontSize: '0.875rem', color: 'var(--text-muted)' }}>Project: E-Commerce Web</div>
-            </div>
-            <div style={{ textAlign: 'right' }}>
-              <div style={{ fontSize: '0.875rem' }}>202ms</div>
-              <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>2 mins ago</div>
+              <div style={{ fontWeight: '600' }}>Last run</div>
+              <div style={{ fontSize: '0.875rem', color: 'var(--text-muted)' }}>
+                {stats.lastRun === 'Never' ? 'No runs yet' : String(stats.lastRun)}
+              </div>
             </div>
           </div>
         </div>
@@ -170,9 +290,24 @@ const Dashboard = () => {
 };
 
 const App = () => {
-  const [user, setUser] = useState(JSON.parse(localStorage.getItem('user')));
+  const [user, setUser] = useState(() => {
+    try {
+      return JSON.parse(localStorage.getItem('user'));
+    } catch {
+      return null;
+    }
+  });
+  const { confirm } = useToast();
 
-  const logout = () => {
+  const logout = async () => {
+    const ok = await confirm({
+      title: 'Log out?',
+      message: 'You will need to sign in again to continue.',
+      confirmText: 'Log out',
+      cancelText: 'Cancel',
+      danger: true,
+    });
+    if (!ok) return;
     localStorage.removeItem('user');
     setUser(null);
   };
@@ -182,6 +317,7 @@ const App = () => {
       <Router>
         <Routes>
           <Route path="/login" element={<LoginPage setAuth={setUser} />} />
+          <Route path="/signup" element={<SignupPage />} />
           <Route path="*" element={<Navigate to="/login" />} />
         </Routes>
       </Router>
@@ -193,14 +329,12 @@ const App = () => {
       <div style={{ display: 'flex' }}>
         <Sidebar user={user} logout={logout} />
         <main style={{ flex: 1, marginLeft: '260px', minHeight: '100vh' }}>
-          {/* <Navbar title="Dashboard" /> */}
           <Routes>
             <Route path="/" element={<Dashboard />} />
             <Route path="/projects" element={<Projects />} />
             <Route path="/projects/:projectId/tests" element={<Tests />} />
             <Route path="/tests/:testId/builder" element={<TestBuilder />} />
-            {/* <Route path="/history" element={<History />} />
-            <Route path="/runner" element={<TestRunner />} /> */}
+            <Route path="/users" element={<Users currentUser={user} />} />
             <Route path="*" element={<Navigate to="/" />} />
           </Routes>
         </main>

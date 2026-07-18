@@ -195,7 +195,7 @@ async function runUiTest(testCaseId) {
         }
 
         try {
-            pushLogs(`🔄 Launching Browser (Headless: ${launchOptions.headless}, Env: ${isCloud ? 'Cloud/Render' : 'Local'})...`);
+            pushLogs(`🔄 Launching Browser (Headless: ${launchOptions.headless}, Env: ${isProduction ? 'Cloud/Render' : 'Local'})...`);
             browser = await puppeteer.launch(launchOptions);
         } catch (err) {
             pushLogs(`❌ Primary launch failed: ${err.message}`);
