@@ -8,6 +8,7 @@ import Tests from './pages/Tests';
 import TestBuilder from './pages/TestBuilder';
 import Users from './pages/Users';
 import config from './config';
+import { apiFetch } from './api';
 import { useToast } from './components/ToastProvider';
 import { ButtonSpinner, DashboardSkeleton } from './components/Loading';
 
@@ -65,7 +66,7 @@ const LoginPage = ({ setAuth }) => {
     e.preventDefault();
     setLoading(true);
     try {
-      const res = await fetch(`${config.API_BASE_URL}/api/login`, {
+      const res = await apiFetch('/api/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ username, password }),
@@ -78,7 +79,12 @@ const LoginPage = ({ setAuth }) => {
       toast.success(`Welcome, ${data.username}`);
       navigate('/');
     } catch (err) {
-      toast.error(err.message || 'Invalid credentials');
+      const msg = String(err?.message || '');
+      if (msg.includes('Failed to fetch') || msg.includes('NetworkError')) {
+        toast.error('Server is waking up — wait 30 seconds and try again.');
+      } else {
+        toast.error(err.message || 'Invalid credentials');
+      }
     } finally {
       setLoading(false);
     }
@@ -124,7 +130,7 @@ const SignupPage = () => {
 
     setLoading(true);
     try {
-      const res = await fetch(`${config.API_BASE_URL}/api/signup`, {
+      const res = await apiFetch('/api/signup', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ username: form.username, password: form.password }),
