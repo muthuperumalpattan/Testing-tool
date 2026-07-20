@@ -17,14 +17,15 @@ const LiveBrowserFrame = memo(function LiveBrowserFrame({ src, frameKey }) {
         );
     }
     return (
+        <div key={frameKey} style={{ flex: 1, display: 'flex', minHeight: 0, width: '100%' }}>
         <iframe
-            key={frameKey}
             title="Test Browser"
             src={src}
-            style={{ flex: 1, width: '100%', border: 'none', background: '#fff' }}
+            style={{ flex: 1, width: '100%', height: '100%', border: 'none', background: '#fff', minHeight: 0 }}
             allow="fullscreen; clipboard-read; clipboard-write"
             referrerPolicy="no-referrer-when-downgrade"
         />
+        </div>
     );
 });
 

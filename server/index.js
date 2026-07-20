@@ -87,6 +87,72 @@ window.addEventListener('message', function (e) {
 window.__CLEAR_SITE_AUTH__ = clearAllBrowserData;
 `;
 
+// Rewrites fetch/XHR/dynamic asset URLs to the same-origin mirror (fixes white screen after SPA navigation).
+const MIRROR_SHIM_JS = `
+(function () {
+    var apiBase = window.__API_BASE__;
+    var targetOrigin = window.__TARGET_ORIGIN__;
+    if (!apiBase || !targetOrigin) return;
+
+    function toMirror(raw) {
+        try {
+            var u = new URL(raw, location.href);
+            if (u.origin !== targetOrigin) return raw;
+            if (u.href.indexOf('/__proxy__/') !== -1) return raw;
+            if (u.href.indexOf('/api/') !== -1 && u.origin === new URL(apiBase).origin) return raw;
+            return apiBase + '/__proxy__/' + u.protocol.replace(':', '') + '/' + u.host + u.pathname + u.search;
+        } catch (e) { return raw; }
+    }
+
+    var origFetch = window.fetch;
+    if (origFetch) {
+        window.fetch = function (input, init) {
+            if (typeof input === 'string') return origFetch.call(this, toMirror(input), init);
+            if (input && input.url) {
+                var mapped = toMirror(input.url);
+                if (mapped !== input.url) return origFetch.call(this, new Request(mapped, input), init);
+            }
+            return origFetch.apply(this, arguments);
+        };
+    }
+
+    var OrigXHR = window.XMLHttpRequest;
+    if (OrigXHR) {
+        window.XMLHttpRequest = function () {
+            var xhr = new OrigXHR();
+            var open = xhr.open;
+            xhr.open = function (method, url) {
+                if (typeof url === 'string') arguments[1] = toMirror(url);
+                return open.apply(xhr, arguments);
+            };
+            return xhr;
+        };
+    }
+
+    function patchSrc(proto) {
+        var desc = Object.getOwnPropertyDescriptor(proto, 'src');
+        if (!desc || !desc.set) return;
+        Object.defineProperty(proto, 'src', {
+            configurable: true,
+            get: desc.get,
+            set: function (v) { desc.set.call(this, toMirror(String(v || ''))); }
+        });
+    }
+    function patchHref(proto) {
+        var desc = Object.getOwnPropertyDescriptor(proto, 'href');
+        if (!desc || !desc.set) return;
+        Object.defineProperty(proto, 'href', {
+            configurable: true,
+            get: desc.get,
+            set: function (v) { desc.set.call(this, toMirror(String(v || ''))); }
+        });
+    }
+    if (window.HTMLScriptElement) patchSrc(HTMLScriptElement.prototype);
+    if (window.HTMLImageElement) patchSrc(HTMLImageElement.prototype);
+    if (window.HTMLLinkElement) patchHref(HTMLLinkElement.prototype);
+})();
+`;
+
 // ── CORS ─────────────────────────────────────────────────────────────────────
 const corsOptions = {
     origin: '*',
@@ -672,6 +738,7 @@ function rewriteHtmlForMirror(html, targetUrl, apiBase, testId, runId, fresh) {
                     window.__RUN_ID__ = "${safeRunId}";
                     window.__TARGET_ORIGIN__ = "${targetOrigin}";
                     window.__CLEAR_SITE_AUTH__ = clearSiteAuth;
+                    ${MIRROR_SHIM_JS}
                     // SPA routers match on location.pathname — swap proxy path for target path
                     try { history.replaceState(null, "", "${safeTargetPath}"); } catch (e6) {}
                 })();
@@ -724,7 +791,7 @@ app.get('/api/clear-session', (req, res) => {
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
     res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
     res.setHeader('Pragma', 'no-cache');
-    res.setHeader('Clear-Site-Data', '"cache", "cookies", "storage", "executionContexts"');
+    res.setHeader('Clear-Site-Data', '"cache", "cookies", "storage"');
     res.setHeader('Content-Security-Policy', 'frame-ancestors *');
     res.send(`<!doctype html><html><head><meta charset="utf-8"><title>Clearing…</title>
 <style>

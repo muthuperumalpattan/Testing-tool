@@ -501,7 +501,8 @@
                                 try { localStorage.clear(); } catch (e1) {}
                                 window.location.href = apiBase + '/api/proxy?url=' + encodeURIComponent(reopen) +
                                     '&testId=' + encodeURIComponent(testId) +
-                                    '&runId=' + encodeURIComponent(runId);
+                                    '&runId=' + encodeURIComponent(runId) +
+                                    '&fresh=0';
                                 return;
                             }
                         }
@@ -514,7 +515,8 @@
                             pushLog('🌐 Navigating to ' + next);
                             window.location.href = apiBase + '/api/proxy?url=' + encodeURIComponent(next) +
                                 '&testId=' + encodeURIComponent(testId) +
-                                '&runId=' + encodeURIComponent(runId);
+                                '&runId=' + encodeURIComponent(runId) +
+                                '&fresh=0';
                             return;
                         }
                     }
