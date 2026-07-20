@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Plus, Pencil, Trash2, Users as UsersIcon, Shield } from 'lucide-react';
-import { apiFetch } from '../api';
+import { apiFetch, apiGet } from '../api';
 import { useToast } from '../components/ToastProvider';
 import { ButtonSpinner, TableSkeleton } from '../components/Loading';
 import EmptyState from '../components/EmptyState';
@@ -21,9 +21,7 @@ const Users = ({ currentUser }) => {
     const loadUsers = async () => {
         setLoading(true);
         try {
-            const res = await apiFetch('/api/users');
-            const data = await res.json();
-            if (!res.ok) throw new Error(data.error || 'Failed to load users');
+            const data = await apiGet('/api/users');
             setUsers(Array.isArray(data) ? data : []);
         } catch (err) {
             toast.error(err.message || 'Failed to load users');

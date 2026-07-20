@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Plus, Globe, Link2, ChevronRight, Edit3, Trash2, ArrowLeft, FolderKanban } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
-import { apiFetch, apiUrl } from '../api';
+import { apiFetch, apiGet, apiUrl } from '../api';
 import { useToast } from '../components/ToastProvider';
 import { ButtonSpinner, CardGridSkeleton } from '../components/Loading';
 import EmptyState from '../components/EmptyState';
@@ -32,9 +32,8 @@ const Projects = () => {
         const query = user?.id != null
             ? `?userId=${encodeURIComponent(user.id)}&role=${encodeURIComponent(user.role || '')}`
             : '';
-        fetch(apiUrl(`/api/projects${query}`))
-            .then(res => res.json())
-            .then(data => {
+        apiGet(`/api/projects${query}`)
+            .then((data) => {
                 if (Array.isArray(data)) {
                     setProjects(data);
                 } else {

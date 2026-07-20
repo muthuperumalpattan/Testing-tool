@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Plus, Play, Edit3, Trash2, ArrowLeft, Terminal, Layout, FlaskConical } from 'lucide-react';
-import { apiFetch, apiUrl } from '../api';
+import { apiFetch, apiGet, apiUrl } from '../api';
 import { useToast } from '../components/ToastProvider';
 import SelectControl from '../components/SelectControl';
 import { ButtonSpinner, TableSkeleton } from '../components/Loading';
@@ -24,8 +24,7 @@ const Tests = () => {
 
     const loadTests = () => {
         setLoading(true);
-        fetch(apiUrl(`/api/projects/${projectId}/tests`))
-            .then(res => res.json())
+        apiGet(`/api/projects/${projectId}/tests`)
             .then((data) => {
                 if (Array.isArray(data)) setTests(data);
                 else {

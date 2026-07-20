@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { PlayCircle, Play, Terminal, Layout, Clock, CheckCircle2, XCircle, Search, Filter } from 'lucide-react';
-import { apiFetch, apiUrl } from '../api';
+import { apiFetch, apiGet, apiUrl } from '../api';
 
 const TestRunner = () => {
     const [projects, setProjects] = useState([]);
@@ -12,12 +12,10 @@ const TestRunner = () => {
 
     useEffect(() => {
         // Fetch all projects and their tests
-        fetch(apiUrl('/api/projects'))
-            .then(res => res.json())
+        apiGet('/api/projects')
             .then(async (fetchedProjects) => {
                 const projectsWithTests = await Promise.all(fetchedProjects.map(async (p) => {
-                    const testsRes2 = await fetch(apiUrl(`/api/projects/${p.id}/tests`));
-                    const tests = await testsRes2.json();
+                    const tests = await apiGet(`/api/projects/${p.id}/tests`);
                     return { ...p, tests };
                 }));
                 setProjects(projectsWithTests);

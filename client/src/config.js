@@ -1,9 +1,14 @@
+// Default backend when VITE_API_BASE_URL is not set (production fallback)
 const PRODUCTION_API = 'https://ams-jcwq.onrender.com';
 
+/**
+ * Normalize API base URL from env / override.
+ * Accepts https://host or https://host/api — paths in this app always start with /api/...
+ */
 function normalizeBase(url) {
-    const base = String(url || '').replace(/\/$/, '');
-    // Never use the Netlify frontend as API host (proxy breaks uploads → 500)
+    let base = String(url || '').trim().replace(/\/+$/, '');
     if (!base || base.includes('netlify.app')) return '';
+    if (base.endsWith('/api')) base = base.slice(0, -4);
     return base;
 }
 

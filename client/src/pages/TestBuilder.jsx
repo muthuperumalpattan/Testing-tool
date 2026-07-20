@@ -1,8 +1,7 @@
 import React, { useState, useEffect, useRef, memo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Save, Play, Plus, Trash2, ArrowLeft, Terminal, Layout, MoveUp, MoveDown, CheckCircle, Activity, GripVertical, Upload } from 'lucide-react';
-import { getApiBaseUrl } from '../config';
-import { apiFetch, apiUrl } from '../api';
+import { apiFetch, apiGet, apiUrl } from '../api';
 import { useToast } from '../components/ToastProvider';
 import SelectControl from '../components/SelectControl';
 import { ButtonSpinner, BuilderSkeleton } from '../components/Loading';
@@ -48,8 +47,8 @@ const TestBuilder = () => {
         setLoading(true);
         setDirty(false);
         Promise.all([
-            fetch(apiUrl(`/api/tests/${testId}/steps`)).then((res) => res.json()),
-            fetch(apiUrl(`/api/tests/${testId}`)).then((res) => res.json()),
+            apiGet(`/api/tests/${testId}/steps`),
+            apiGet(`/api/tests/${testId}`),
         ])
             .then(([stepsData, testData]) => {
                 setSteps((stepsData || []).map((s) => ({ type: s.type, payload: JSON.parse(s.payload) })));
@@ -326,7 +325,7 @@ const TestBuilder = () => {
     const closeLiveSession = async () => {
         setRunning(false);
         // Navigate iframe to clear-session on backend origin so localStorage/cookies are wiped
-        setBrowserUrl(`${getApiBaseUrl()}/api/clear-session?t=${Date.now()}`);
+        setBrowserUrl(apiUrl(`/api/clear-session?t=${Date.now()}`));
         await new Promise((r) => setTimeout(r, 400));
         setLiveOpen(false);
         setBrowserUrl(null);
@@ -346,14 +345,14 @@ const TestBuilder = () => {
 
         try {
             // Clear any leftover login session from previous runs in the iframe origin
-            setBrowserUrl(`${getApiBaseUrl()}/api/clear-session?t=${Date.now()}`);
+            setBrowserUrl(apiUrl(`/api/clear-session?t=${Date.now()}`));
             await new Promise((r) => setTimeout(r, 500));
 
             // Always persist current builder steps before run — otherwise DB still has old project steps/URLs
             await saveTest(true);
 
             const runId = Date.now();
-            const proxyUrl = `${getApiBaseUrl()}/api/proxy?url=${encodeURIComponent(startUrl)}&testId=${testId}&runId=${runId}&fresh=1`;
+            const proxyUrl = apiUrl(`/api/proxy?url=${encodeURIComponent(startUrl)}&testId=${testId}&runId=${runId}&fresh=1`);
             browserUrlRef.current = proxyUrl;
             setBrowserUrl(proxyUrl);
             setTest((prev) => prev ? { ...prev, websiteUrl: startUrl } : prev);

@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { History as HistoryIcon, Clock, CheckCircle2, XCircle, ArrowLeft, ExternalLink, Filter } from 'lucide-react';
-import { apiUrl } from '../api';
+import { apiFetch, apiGet, apiUrl } from '../api';
 
 const History = () => {
     const [results, setResults] = useState([]);
@@ -9,9 +9,8 @@ const History = () => {
     const navigate = useNavigate();
 
     useEffect(() => {
-        fetch(apiUrl('/api/results'))
-            .then(res => res.json())
-            .then(data => {
+        apiGet('/api/results')
+            .then((data) => {
                 setResults(data);
                 setLoading(false);
             })
