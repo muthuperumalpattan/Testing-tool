@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Plus, Pencil, Trash2, Users as UsersIcon, Shield } from 'lucide-react';
-import config from '../config';
+import { apiFetch } from '../api';
 import { useToast } from '../components/ToastProvider';
 import { ButtonSpinner, TableSkeleton } from '../components/Loading';
 import EmptyState from '../components/EmptyState';
@@ -21,7 +21,7 @@ const Users = ({ currentUser }) => {
     const loadUsers = async () => {
         setLoading(true);
         try {
-            const res = await fetch(`${config.API_BASE_URL}/api/users`);
+            const res = await apiFetch('/api/users');
             const data = await res.json();
             if (!res.ok) throw new Error(data.error || 'Failed to load users');
             setUsers(Array.isArray(data) ? data : []);
@@ -72,9 +72,7 @@ const Users = ({ currentUser }) => {
 
         setSaving(true);
         try {
-            const url = editing
-                ? `${config.API_BASE_URL}/api/users/${editing.id}`
-                : `${config.API_BASE_URL}/api/users`;
+            const path = editing ? `/api/users/${editing.id}` : '/api/users';
             const method = editing ? 'PUT' : 'POST';
             const body = {
                 username: form.username.trim(),
@@ -82,7 +80,7 @@ const Users = ({ currentUser }) => {
             };
             if (form.password) body.password = form.password;
 
-            const res = await fetch(url, {
+            const res = await apiFetch(path, {
                 method,
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(body),
@@ -117,7 +115,7 @@ const Users = ({ currentUser }) => {
         if (!ok) return;
 
         try {
-            const res = await fetch(`${config.API_BASE_URL}/api/users/${user.id}`, { method: 'DELETE' });
+            const res = await apiFetch(`/api/users/${user.id}`, { method: 'DELETE' });
             const data = await res.json().catch(() => ({}));
             if (!res.ok) throw new Error(data.error || 'Failed to delete user');
             toast.success('User deleted');
