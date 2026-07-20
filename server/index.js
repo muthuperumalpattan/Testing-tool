@@ -44,6 +44,49 @@ function getPublicBaseUrl(req) {
     return `${proto}://${host}`;
 }
 
+// Clears login state + Cache Storage + service workers inside the proxied iframe (same origin as API).
+const CLEAR_BROWSER_DATA_JS = `
+function clearAllBrowserData() {
+    try { localStorage.clear(); } catch (e1) {}
+    try { sessionStorage.clear(); } catch (e2) {}
+    try {
+        document.cookie.split(';').forEach(function (c) {
+            var n = c.split('=')[0].trim();
+            if (!n) return;
+            document.cookie = n + '=;expires=Thu, 01 Jan 1970 00:00:00 GMT;path=/';
+            document.cookie = n + '=;expires=Thu, 01 Jan 1970 00:00:00 GMT;path=/;domain=' + location.hostname;
+        });
+    } catch (e3) {}
+    try {
+        if (window.indexedDB && indexedDB.databases) {
+            indexedDB.databases().then(function (dbs) {
+                (dbs || []).forEach(function (db) {
+                    if (db && db.name) indexedDB.deleteDatabase(db.name);
+                });
+            });
+        }
+    } catch (e4) {}
+    try {
+        if (window.caches && caches.keys) {
+            caches.keys().then(function (keys) {
+                keys.forEach(function (k) { caches.delete(k); });
+            });
+        }
+    } catch (e5) {}
+    try {
+        if (navigator.serviceWorker && navigator.serviceWorker.getRegistrations) {
+            navigator.serviceWorker.getRegistrations().then(function (regs) {
+                regs.forEach(function (r) { r.unregister(); });
+            });
+        }
+    } catch (e6) {}
+}
+window.addEventListener('message', function (e) {
+    if (e && e.data === 'CLEAR_TEST_SESSION') clearAllBrowserData();
+});
+window.__CLEAR_SITE_AUTH__ = clearAllBrowserData;
+`;
+
 // ── CORS ─────────────────────────────────────────────────────────────────────
 const corsOptions = {
     origin: '*',
@@ -602,26 +645,8 @@ function rewriteHtmlForMirror(html, targetUrl, apiBase, testId, runId) {
     const scriptInjection = `
             <script>
                 (function () {
-                    function clearSiteAuth() {
-                        try { localStorage.clear(); } catch (e1) {}
-                        try {
-                            document.cookie.split(";").forEach(function (c) {
-                                var n = c.split("=")[0].trim();
-                                if (!n) return;
-                                document.cookie = n + "=;expires=Thu, 01 Jan 1970 00:00:00 GMT;path=/";
-                                document.cookie = n + "=;expires=Thu, 01 Jan 1970 00:00:00 GMT;path=/;domain=" + location.hostname;
-                            });
-                        } catch (e2) {}
-                        try {
-                            if (window.indexedDB && indexedDB.databases) {
-                                indexedDB.databases().then(function (dbs) {
-                                    (dbs || []).forEach(function (db) {
-                                        if (db && db.name) indexedDB.deleteDatabase(db.name);
-                                    });
-                                });
-                            }
-                        } catch (e3) {}
-                    }
+                    ${CLEAR_BROWSER_DATA_JS}
+                    function clearSiteAuth() { clearAllBrowserData(); }
                     try {
                         var wipeKey = "__auto_wipe_${safeTestId}_${safeRunId}";
                         var keep = {};
@@ -629,7 +654,6 @@ function rewriteHtmlForMirror(html, targetUrl, apiBase, testId, runId) {
                             var k = sessionStorage.key(i);
                             if (k && k.indexOf("__auto_") === 0) keep[k] = sessionStorage.getItem(k);
                         }
-                        // Always clear app auth when this run has not wiped yet
                         if (!sessionStorage.getItem(wipeKey)) {
                             clearSiteAuth();
                             try { sessionStorage.clear(); } catch (e4) {}
@@ -637,16 +661,14 @@ function rewriteHtmlForMirror(html, targetUrl, apiBase, testId, runId) {
                             sessionStorage.setItem(wipeKey, "1");
                         }
                     } catch (e) {
-                        try { localStorage.clear(); } catch (e5) {}
+                        try { clearAllBrowserData(); } catch (e5) {}
                     }
                     window.__TEST_ID__ = "${safeTestId}";
                     window.__API_BASE__ = "${apiBase}";
                     window.__RUN_ID__ = "${safeRunId}";
                     window.__TARGET_ORIGIN__ = "${targetOrigin}";
                     window.__CLEAR_SITE_AUTH__ = clearSiteAuth;
-                    // SPA routers match on location.pathname — swap our proxy path
-                    // (/api/proxy) for the target site's real path so the app
-                    // renders the right page instead of its 404 screen.
+                    // SPA routers match on location.pathname — swap proxy path for target path
                     try { history.replaceState(null, "", "${safeTargetPath}"); } catch (e6) {}
                 })();
             </script>
@@ -694,10 +716,13 @@ async function fetchTargetBuffer(targetUrl, req) {
 }
 
 app.get('/api/clear-session', (req, res) => {
+    const isFull = req.query.full === '1';
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
-    res.setHeader('Cache-Control', 'no-store');
-    res.setHeader('Content-Security-Policy', "frame-ancestors *");
-    res.send(`<!doctype html><html><head><meta charset="utf-8"><title>Loading…</title>
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Clear-Site-Data', '"cache", "cookies", "storage", "executionContexts"');
+    res.setHeader('Content-Security-Policy', 'frame-ancestors *');
+    res.send(`<!doctype html><html><head><meta charset="utf-8"><title>Clearing…</title>
 <style>
   body { margin:0; font-family:'Inter',system-ui,sans-serif; background:#0b1220; color:#e2e8f0;
          min-height:100vh; display:flex; align-items:center; justify-content:center; }
@@ -713,30 +738,12 @@ app.get('/api/clear-session', (req, res) => {
 <body>
 <div class="box">
   <div class="spinner"></div>
-  <h2>Preparing test session…</h2>
-  <p>Clearing previous login data and loading the page.</p>
+  <h2>${isFull ? 'Session &amp; browser cache cleared' : 'Preparing test session…'}</h2>
+  <p>${isFull ? 'Login data, cookies, and cached files were removed.' : 'Clearing previous login data and loading the page.'}</p>
 </div>
 <script>
-(function () {
-  try { localStorage.clear(); } catch (e) {}
-  try { sessionStorage.clear(); } catch (e) {}
-  try {
-    document.cookie.split(";").forEach(function (c) {
-      var n = c.split("=")[0].trim();
-      if (!n) return;
-      document.cookie = n + "=;expires=Thu, 01 Jan 1970 00:00:00 GMT;path=/";
-    });
-  } catch (e) {}
-  try {
-    if (indexedDB && indexedDB.databases) {
-      indexedDB.databases().then(function (dbs) {
-        (dbs || []).forEach(function (db) {
-          if (db && db.name) indexedDB.deleteDatabase(db.name);
-        });
-      });
-    }
-  } catch (e) {}
-})();
+${CLEAR_BROWSER_DATA_JS}
+clearAllBrowserData();
 </script>
 </body></html>`);
 });

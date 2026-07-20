@@ -350,9 +350,16 @@ const TestBuilder = () => {
 
     const closeLiveSession = async () => {
         setRunning(false);
-        // Navigate iframe to clear-session on backend origin so localStorage/cookies are wiped
-        setBrowserUrl(apiUrl(`/api/clear-session?t=${Date.now()}`));
-        await new Promise((r) => setTimeout(r, 400));
+        // Ask the live iframe to wipe site data before we navigate away
+        try {
+            const iframe = document.querySelector('iframe[title="Test Browser"]');
+            iframe?.contentWindow?.postMessage('CLEAR_TEST_SESSION', '*');
+        } catch (_) { /* cross-origin safe */ }
+        await new Promise((r) => setTimeout(r, 300));
+        setBrowserUrl(apiUrl(`/api/clear-session?full=1&t=${Date.now()}`));
+        await new Promise((r) => setTimeout(r, 1000));
+        setBrowserUrl('about:blank');
+        await new Promise((r) => setTimeout(r, 150));
         setLiveOpen(false);
         setBrowserUrl(null);
         browserUrlRef.current = null;
@@ -371,8 +378,8 @@ const TestBuilder = () => {
 
         try {
             // Clear any leftover login session from previous runs in the iframe origin
-            setBrowserUrl(apiUrl(`/api/clear-session?t=${Date.now()}`));
-            await new Promise((r) => setTimeout(r, 500));
+            setBrowserUrl(apiUrl(`/api/clear-session?full=1&t=${Date.now()}`));
+            await new Promise((r) => setTimeout(r, 600));
 
             // Always persist current builder steps before run — otherwise DB still has old project steps/URLs
             await saveTest(true);
