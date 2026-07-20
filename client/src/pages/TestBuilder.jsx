@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useRef, memo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Save, Play, Plus, Trash2, ArrowLeft, Terminal, Layout, MoveUp, MoveDown, CheckCircle, Activity, GripVertical, Upload } from 'lucide-react';
-import config from '../config';
-import { apiFetch } from '../api';
+import { getApiBaseUrl } from '../config';
+import { apiFetch, apiUrl } from '../api';
 import { useToast } from '../components/ToastProvider';
 import SelectControl from '../components/SelectControl';
 import { ButtonSpinner, BuilderSkeleton } from '../components/Loading';
@@ -29,7 +29,6 @@ const LiveBrowserFrame = memo(function LiveBrowserFrame({ src }) {
 });
 
 const TestBuilder = () => {
-    const API_BASE_URL = config.API_BASE_URL;
     const { testId } = useParams();
     const navigate = useNavigate();
     const { toast, confirm } = useToast();
@@ -49,8 +48,8 @@ const TestBuilder = () => {
         setLoading(true);
         setDirty(false);
         Promise.all([
-            fetch(`${API_BASE_URL}/api/tests/${testId}/steps`).then((res) => res.json()),
-            fetch(`${API_BASE_URL}/api/tests/${testId}`).then((res) => res.json()),
+            fetch(apiUrl(`/api/tests/${testId}/steps`)).then((res) => res.json()),
+            fetch(apiUrl(`/api/tests/${testId}`)).then((res) => res.json()),
         ])
             .then(([stepsData, testData]) => {
                 setSteps((stepsData || []).map((s) => ({ type: s.type, payload: JSON.parse(s.payload) })));
@@ -62,7 +61,7 @@ const TestBuilder = () => {
                 toast.error('Failed to load test details');
             })
             .finally(() => setLoading(false));
-    }, [testId, API_BASE_URL]);
+    }, [testId]);
 
     const markDirty = () => setDirty(true);
 
@@ -188,7 +187,7 @@ const TestBuilder = () => {
     };
 
     const setStatus = async (status) => {
-        const res = await fetch(`${API_BASE_URL}/api/tests/${testId}/status`, {
+        const res = await apiFetch(`/api/tests/${testId}/status`, {
             method: 'PATCH',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ status })
@@ -261,7 +260,7 @@ const TestBuilder = () => {
             if (cancelled) return;
 
             try {
-                const res = await fetch(`${API_BASE_URL}/api/tests/${testId}/run-status`, {
+                const res = await apiFetch(`/api/tests/${testId}/run-status`, {
                     signal: AbortSignal.timeout(15000)
                 });
 
@@ -327,7 +326,7 @@ const TestBuilder = () => {
     const closeLiveSession = async () => {
         setRunning(false);
         // Navigate iframe to clear-session on backend origin so localStorage/cookies are wiped
-        setBrowserUrl(`${API_BASE_URL}/api/clear-session?t=${Date.now()}`);
+        setBrowserUrl(`${getApiBaseUrl()}/api/clear-session?t=${Date.now()}`);
         await new Promise((r) => setTimeout(r, 400));
         setLiveOpen(false);
         setBrowserUrl(null);
@@ -347,20 +346,20 @@ const TestBuilder = () => {
 
         try {
             // Clear any leftover login session from previous runs in the iframe origin
-            setBrowserUrl(`${API_BASE_URL}/api/clear-session?t=${Date.now()}`);
+            setBrowserUrl(`${getApiBaseUrl()}/api/clear-session?t=${Date.now()}`);
             await new Promise((r) => setTimeout(r, 500));
 
             // Always persist current builder steps before run — otherwise DB still has old project steps/URLs
             await saveTest(true);
 
             const runId = Date.now();
-            const proxyUrl = `${API_BASE_URL}/api/proxy?url=${encodeURIComponent(startUrl)}&testId=${testId}&runId=${runId}&fresh=1`;
+            const proxyUrl = `${getApiBaseUrl()}/api/proxy?url=${encodeURIComponent(startUrl)}&testId=${testId}&runId=${runId}&fresh=1`;
             browserUrlRef.current = proxyUrl;
             setBrowserUrl(proxyUrl);
             setTest((prev) => prev ? { ...prev, websiteUrl: startUrl } : prev);
 
             // Live mode: only the in-app browser runs steps (no Puppeteer = faster, no flicker)
-            await fetch(`${API_BASE_URL}/api/tests/${testId}/run`, {
+            await apiFetch(`/api/tests/${testId}/run`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ mode: 'live' })
@@ -830,10 +829,10 @@ const TestBuilder = () => {
                                         <div key={i} className="glass" style={{ padding: '0.5rem', borderRadius: '8px' }}>
                                             <div style={{ fontSize: '0.75rem', marginBottom: '0.5rem', fontWeight: 'bold' }}>Step {snap.stepOrder}: {snap.label}</div>
                                             <img 
-                                                src={`${API_BASE_URL}/screenshots/${snap.fileName}`} 
+                                                src={apiUrl(`/screenshots/${snap.fileName}`)} 
                                                 alt={snap.label} 
                                                 style={{ width: '100%', borderRadius: '4px', cursor: 'pointer' }}
-                                                onClick={() => window.open(`${API_BASE_URL}/screenshots/${snap.fileName}`, '_blank')}
+                                                onClick={() => window.open(apiUrl(`/screenshots/${snap.fileName}`), '_blank')}
                                             />
                                         </div>
                                     ))}

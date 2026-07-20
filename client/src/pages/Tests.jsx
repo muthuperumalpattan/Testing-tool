@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Plus, Play, Edit3, Trash2, ArrowLeft, Terminal, Layout, FlaskConical } from 'lucide-react';
-import config from '../config';
+import { apiFetch, apiUrl } from '../api';
 import { useToast } from '../components/ToastProvider';
 import SelectControl from '../components/SelectControl';
 import { ButtonSpinner, TableSkeleton } from '../components/Loading';
@@ -24,7 +24,7 @@ const Tests = () => {
 
     const loadTests = () => {
         setLoading(true);
-        fetch(`${config.API_BASE_URL}/api/projects/${projectId}/tests`)
+        fetch(apiUrl(`/api/projects/${projectId}/tests`))
             .then(res => res.json())
             .then((data) => {
                 if (Array.isArray(data)) setTests(data);
@@ -74,7 +74,7 @@ const Tests = () => {
         setSaving(true);
         try {
             if (editing) {
-                const res = await fetch(`${config.API_BASE_URL}/api/tests/${editing.id}`, {
+                const res = await apiFetch(`/api/tests/${editing.id}`, {
                     method: 'PUT',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ name: form.name.trim(), type: form.type }),
@@ -85,7 +85,7 @@ const Tests = () => {
                 closeModal();
                 loadTests();
             } else {
-                const res = await fetch(`${config.API_BASE_URL}/api/tests`, {
+                const res = await apiFetch('/api/tests', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
@@ -120,7 +120,7 @@ const Tests = () => {
         if (!ok) return;
 
         try {
-            const res = await fetch(`${config.API_BASE_URL}/api/tests/${test.id}`, { method: 'DELETE' });
+            const res = await apiFetch(`/api/tests/${test.id}`, { method: 'DELETE' });
             const data = await res.json().catch(() => ({}));
             if (!res.ok) throw new Error(data.error || 'Failed to delete test');
             toast.success('Test deleted');

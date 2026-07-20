@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { PlayCircle, Play, Terminal, Layout, Clock, CheckCircle2, XCircle, Search, Filter } from 'lucide-react';
-import config from '../config';
+import { apiFetch, apiUrl } from '../api';
 
 const TestRunner = () => {
     const [projects, setProjects] = useState([]);
@@ -12,13 +12,11 @@ const TestRunner = () => {
 
     useEffect(() => {
         // Fetch all projects and their tests
-        fetch(`${config.API_BASE_URL}/api/projects`)
+        fetch(apiUrl('/api/projects'))
             .then(res => res.json())
             .then(async (fetchedProjects) => {
                 const projectsWithTests = await Promise.all(fetchedProjects.map(async (p) => {
-                    const testsRes = await fetch(`${config.API_BASE_URL}/api/tests?projectId=${p.id}`); // Note: Backend needs to handle this or we fetch all and filter
-                    // For now, let's fetch tests for each project
-                    const testsRes2 = await fetch(`${config.API_BASE_URL}/api/projects/${p.id}/tests`);
+                    const testsRes2 = await fetch(apiUrl(`/api/projects/${p.id}/tests`));
                     const tests = await testsRes2.json();
                     return { ...p, tests };
                 }));
@@ -29,7 +27,7 @@ const TestRunner = () => {
     const handleRunTest = async (testId) => {
         setRunningTestId(testId);
         try {
-            const res = await fetch(`${config.API_BASE_URL}/api/tests/${testId}/run`, { method: 'POST' });
+            const res = await apiFetch(`/api/tests/${testId}/run`, { method: 'POST' });
             const result = await res.json();
             setTestStats(prev => ({ ...prev, [testId]: result.status }));
         } catch (err) {

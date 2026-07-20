@@ -4,6 +4,10 @@ const RETRY_STATUSES = new Set([502, 503, 504]);
 const RETRY_DELAY_MS = 10000;
 const MAX_ATTEMPTS = 3;
 
+export function apiUrl(path) {
+    return `${getApiBaseUrl()}${path}`;
+}
+
 /** Fetch with retries for Render cold starts (502/503/504). */
 export async function apiFetch(path, options = {}) {
     let lastError;

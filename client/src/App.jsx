@@ -7,8 +7,7 @@ import Projects from './pages/Projects';
 import Tests from './pages/Tests';
 import TestBuilder from './pages/TestBuilder';
 import Users from './pages/Users';
-import config from './config';
-import { apiFetch } from './api';
+import { apiFetch, apiUrl } from './api';
 import { useToast } from './components/ToastProvider';
 import { ButtonSpinner, DashboardSkeleton } from './components/Loading';
 
@@ -217,7 +216,7 @@ const Dashboard = () => {
     const query = user?.id != null
       ? `?userId=${encodeURIComponent(user.id)}&role=${encodeURIComponent(user.role || '')}`
       : '';
-    fetch(`${config.API_BASE_URL}/api/stats${query}`)
+    fetch(apiUrl(`/api/stats${query}`))
       .then(res => res.json())
       .then(setStats)
       .catch(console.error)

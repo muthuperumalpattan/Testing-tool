@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Plus, Globe, Link2, ChevronRight, Edit3, Trash2, ArrowLeft, FolderKanban } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
-import config from '../config';
+import { apiFetch, apiUrl } from '../api';
 import { useToast } from '../components/ToastProvider';
 import { ButtonSpinner, CardGridSkeleton } from '../components/Loading';
 import EmptyState from '../components/EmptyState';
@@ -32,7 +32,7 @@ const Projects = () => {
         const query = user?.id != null
             ? `?userId=${encodeURIComponent(user.id)}&role=${encodeURIComponent(user.role || '')}`
             : '';
-        fetch(`${config.API_BASE_URL}/api/projects${query}`)
+        fetch(apiUrl(`/api/projects${query}`))
             .then(res => res.json())
             .then(data => {
                 if (Array.isArray(data)) {
@@ -88,11 +88,9 @@ const Projects = () => {
 
         setSaving(true);
         try {
-            const url = editing
-                ? `${config.API_BASE_URL}/api/projects/${editing.id}`
-                : `${config.API_BASE_URL}/api/projects`;
+            const path = editing ? `/api/projects/${editing.id}` : '/api/projects';
             const method = editing ? 'PUT' : 'POST';
-            const res = await fetch(url, {
+            const res = await apiFetch(path, {
                 method,
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -134,7 +132,7 @@ const Projects = () => {
         if (!ok) return;
 
         try {
-            const res = await fetch(`${config.API_BASE_URL}/api/projects/${project.id}`, { method: 'DELETE' });
+            const res = await apiFetch(`/api/projects/${project.id}`, { method: 'DELETE' });
             const data = await res.json().catch(() => ({}));
             if (!res.ok) throw new Error(data.error || 'Failed to delete project');
             toast.success('Project deleted');
