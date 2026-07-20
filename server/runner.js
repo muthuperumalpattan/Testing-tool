@@ -145,6 +145,7 @@ async function runUiTest(testCaseId) {
             process.env.CHROME_PATH,
             process.env.CHROME_BIN,
             '/usr/bin/google-chrome',
+            '/usr/bin/chromium',
             '/usr/bin/chromium-browser',
             '/opt/render/project/.render/chrome/opt/google/chrome/google-chrome',
             path.join(__dirname, '.cache', 'puppeteer', 'chrome', 'linux-134.0.6998.35', 'chrome-linux64', 'chrome') // Guess at bundled path

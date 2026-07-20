@@ -1,7 +1,9 @@
 # API proxy must come first — Netlify uses first matching rule
+# Replace the URL below with your Northflank service URL (Settings → Ports → Public URL)
+# Example: https://testing-backend-xxxxx.code.run
 [[redirects]]
   from = "/api/*"
-  to = "https://testingbackend-xia0.onrender.com/api/:splat"
+  to = "https://REPLACE-WITH-YOUR-NORTHFLANK-URL/api/:splat"
   status = 200
   force = true
 
