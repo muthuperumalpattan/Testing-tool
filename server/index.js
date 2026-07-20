@@ -394,25 +394,32 @@ app.patch('/api/tests/:id/status', async (req, res) => {
 });
 
 app.post('/api/tests/:id/steps', async (req, res) => {
+    const client = await getPool().connect();
     try {
         const { steps } = req.body || {};
         if (!Array.isArray(steps)) {
             return res.status(400).json({ error: 'steps must be an array' });
         }
 
-        await getPool().query('DELETE FROM test_steps WHERE "testCaseId" = $1', [req.params.id]);
+        await client.query('BEGIN');
+        await client.query('DELETE FROM test_steps WHERE "testCaseId" = $1', [req.params.id]);
 
         for (let i = 0; i < steps.length; i++) {
             const payload = JSON.stringify(steps[i].payload ?? {});
-            await getPool().query(
+            await client.query(
                 'INSERT INTO test_steps ("testCaseId", "stepOrder", type, payload) VALUES ($1, $2, $3, $4)',
                 [req.params.id, i + 1, steps[i].type, payload]
             );
         }
-        res.json({ success: true });
+
+        await client.query('COMMIT');
+        res.json({ success: true, count: steps.length });
     } catch (error) {
+        await client.query('ROLLBACK').catch(() => {});
         console.error('Save steps error:', error);
         res.status(500).json({ error: 'Failed to save steps', details: error.message });
+    } finally {
+        client.release();
     }
 });
 

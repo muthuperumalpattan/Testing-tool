@@ -43,6 +43,26 @@ const TestBuilder = () => {
     const [liveOpen, setLiveOpen] = useState(false);
     const browserUrlRef = useRef(null);
 
+    const parseStepsFromApi = (stepsData) => (stepsData || []).map((s, index) => {
+        try {
+            const payload = typeof s.payload === 'string' ? JSON.parse(s.payload) : (s.payload || {});
+            return { type: s.type, payload };
+        } catch (err) {
+            console.error(`Step ${index + 1} parse error:`, err);
+            return {
+                type: s.type || 'WAIT_FOR',
+                payload: { label: `Step ${index + 1} (reload issue)`, selector: '', _parseError: true },
+            };
+        }
+    });
+
+    const reloadStepsFromServer = async () => {
+        const stepsData = await apiGet(`/api/tests/${testId}/steps`);
+        setSteps(parseStepsFromApi(stepsData));
+        setDirty(false);
+        return stepsData;
+    };
+
     useEffect(() => {
         setLoading(true);
         setDirty(false);
@@ -51,7 +71,7 @@ const TestBuilder = () => {
             apiGet(`/api/tests/${testId}`),
         ])
             .then(([stepsData, testData]) => {
-                setSteps((stepsData || []).map((s) => ({ type: s.type, payload: JSON.parse(s.payload) })));
+                setSteps(parseStepsFromApi(stepsData));
                 setTest(testData);
                 setDirty(false);
             })
@@ -168,11 +188,17 @@ const TestBuilder = () => {
                 const data = await res.json().catch(() => ({}));
                 throw new Error(data.error || data.details || 'Failed to save steps');
             }
+            const saved = await res.json().catch(() => ({}));
             setDirty(false);
-            if (!quiet) toast.success('Test saved successfully');
+            if (!quiet) toast.success(`Test saved (${saved.count ?? steps.length} steps)`);
             return true;
         } catch (err) {
             toast.error(err.message || 'Failed to save test');
+            try {
+                await reloadStepsFromServer();
+            } catch {
+                /* keep local steps if reload fails */
+            }
             return false;
         } finally {
             setSaving(false);
