@@ -1,3 +1,4 @@
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { History as HistoryIcon, Clock, CheckCircle2, XCircle, ArrowLeft, ExternalLink, Filter } from 'lucide-react';
 import { apiUrl } from '../api';
