@@ -23,6 +23,10 @@ function getExecutionStatus(testCaseId) {
     };
 }
 
+function clearExecution(testCaseId) {
+    activeExecutions.delete(String(testCaseId));
+}
+
 async function runApiTest(testCaseId) {
     const stepsRes = await getPool().query('SELECT * FROM test_steps WHERE "testCaseId" = $1 ORDER BY "stepOrder" ASC', [testCaseId]);
     const steps = stepsRes.rows;
@@ -681,4 +685,4 @@ async function runUiTest(testCaseId) {
     return finalResult;
 }
 
-module.exports = { runApiTest, runUiTest, getExecutionStatus, activeExecutions };
+module.exports = { runApiTest, runUiTest, getExecutionStatus, clearExecution, activeExecutions };

@@ -448,9 +448,12 @@
     }
 
     async function executeSteps() {
-        installNetworkProbe();
-
         var startIdx = parseInt(sessionStorage.getItem(stepKey) || '0', 10);
+        if (startIdx === 0) {
+            try { sessionStorage.removeItem('__auto_net_' + testId + '_' + runId); } catch (e0) {}
+            window.__NET_PROBE__ = [];
+        }
+        installNetworkProbe();
         var startedAt = parseInt(sessionStorage.getItem(startKey) || String(Date.now()), 10);
         sessionStorage.setItem(startKey, String(startedAt));
 

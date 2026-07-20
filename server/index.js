@@ -6,7 +6,7 @@ const https = require('https');
 const bcrypt = require('bcryptjs');
 const axios = require('axios'); // For proxying
 const { getPool, initDb } = require('./db');
-const { runApiTest, runUiTest, getExecutionStatus, activeExecutions } = require('./runner');
+const { runApiTest, runUiTest, getExecutionStatus, clearExecution, activeExecutions } = require('./runner');
 require('dotenv').config();
 
 const ALLOWED_ROLES = ['Admin', 'Tester', 'Employee'];
@@ -483,7 +483,9 @@ app.post('/api/tests/:id/run', async (req, res) => {
             activeExecutions.set(String(test.id), {
                 logs: '🚀 Live browser mode — running steps in the panel…',
                 snapshots: [],
+                networkHistory: [],
                 finished: false,
+                status: undefined,
                 mode: 'live'
             });
             return res.json({ message: 'Live execution started', mode: 'live' });
@@ -501,16 +503,21 @@ app.post('/api/tests/:id/run', async (req, res) => {
     }
 });
 
+app.post('/api/tests/:id/stop-live', (req, res) => {
+    clearExecution(req.params.id);
+    res.json({ ok: true });
+});
+
 // Progress updates from the in-page automation engine
 app.post('/api/tests/:id/live-progress', async (req, res) => {
     const id = String(req.params.id);
     const { logs, finished, status, step, network } = req.body || {};
-    const current = activeExecutions.get(id) || { logs: '', snapshots: [] };
+    const current = activeExecutions.get(id) || { logs: '', snapshots: [], networkHistory: [] };
     const nextLogs = logs != null ? logs : current.logs;
     activeExecutions.set(id, {
         ...current,
         logs: nextLogs,
-        networkHistory: Array.isArray(network) && network.length ? network : current.networkHistory,
+        networkHistory: Array.isArray(network) ? network : (current.networkHistory || []),
         step: step ?? current.step,
         finished: !!finished,
         status: status || current.status || (finished ? 'Passed' : undefined),
@@ -631,12 +638,13 @@ function toMirrorUrl(apiBase, absoluteUrl) {
     return `${apiBase}/__proxy__/${u.protocol.replace(':', '')}/${u.host}${u.pathname}${u.search}`;
 }
 
-function rewriteHtmlForMirror(html, targetUrl, apiBase, testId, runId) {
+function rewriteHtmlForMirror(html, targetUrl, apiBase, testId, runId, fresh) {
     const target = new URL(targetUrl);
     const targetOrigin = target.origin;
     const mirrorBase = siteMirrorBase(apiBase, targetOrigin) + '/';
     const safeRunId = String(runId || Date.now()).replace(/"/g, '');
     const safeTestId = String(testId || '').replace(/"/g, '');
+    const forceFresh = fresh === true || fresh === '1' || fresh === 1;
     // SPA routers read location.pathname — it must match the target site's path
     // (e.g. /sign-in), not our proxy path (/api/proxy), or the app renders its 404 page.
     const safeTargetPath = (target.pathname + target.search).replace(/"/g, '\\"');
@@ -648,16 +656,12 @@ function rewriteHtmlForMirror(html, targetUrl, apiBase, testId, runId) {
                     ${CLEAR_BROWSER_DATA_JS}
                     function clearSiteAuth() { clearAllBrowserData(); }
                     try {
+                        window.__AUTOMATION_RUNNING__ = false;
                         var wipeKey = "__auto_wipe_${safeTestId}_${safeRunId}";
-                        var keep = {};
-                        for (var i = 0; i < sessionStorage.length; i++) {
-                            var k = sessionStorage.key(i);
-                            if (k && k.indexOf("__auto_") === 0) keep[k] = sessionStorage.getItem(k);
-                        }
-                        if (!sessionStorage.getItem(wipeKey)) {
+                        var forceFresh = ${forceFresh ? 'true' : 'false'};
+                        if (forceFresh || !sessionStorage.getItem(wipeKey)) {
                             clearSiteAuth();
                             try { sessionStorage.clear(); } catch (e4) {}
-                            Object.keys(keep).forEach(function (k) { sessionStorage.setItem(k, keep[k]); });
                             sessionStorage.setItem(wipeKey, "1");
                         }
                     } catch (e) {
@@ -749,7 +753,7 @@ clearAllBrowserData();
 });
 
 app.get('/api/proxy', async (req, res) => {
-    const { url, testId, runId } = req.query;
+    const { url, testId, runId, fresh } = req.query;
     if (!url) return res.status(400).send('URL is required');
 
     try {
@@ -775,7 +779,7 @@ app.get('/api/proxy', async (req, res) => {
         lastProxyTargetOrigin = new URL(url).origin;
         const apiBase = getPublicBaseUrl(req);
         let html = typeof response.data === 'string' ? response.data : String(response.data);
-        html = rewriteHtmlForMirror(html, url, apiBase, testId, runId || Date.now());
+        html = rewriteHtmlForMirror(html, url, apiBase, testId, runId || Date.now(), fresh);
 
         res.setHeader('Content-Type', 'text/html; charset=utf-8');
         res.setHeader('Content-Security-Policy', "frame-ancestors *");

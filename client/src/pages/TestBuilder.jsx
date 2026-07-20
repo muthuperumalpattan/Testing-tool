@@ -7,7 +7,7 @@ import SelectControl from '../components/SelectControl';
 import { ButtonSpinner, BuilderSkeleton } from '../components/Loading';
 import EmptyState from '../components/EmptyState';
 
-const LiveBrowserFrame = memo(function LiveBrowserFrame({ src }) {
+const LiveBrowserFrame = memo(function LiveBrowserFrame({ src, frameKey }) {
     if (!src) {
         return (
             <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '1rem', color: 'var(--text-muted)' }}>
@@ -18,6 +18,7 @@ const LiveBrowserFrame = memo(function LiveBrowserFrame({ src }) {
     }
     return (
         <iframe
+            key={frameKey}
             title="Test Browser"
             src={src}
             style={{ flex: 1, width: '100%', border: 'none', background: '#fff' }}
@@ -41,6 +42,7 @@ const TestBuilder = () => {
     const [result, setResult] = useState(null);
     const [browserUrl, setBrowserUrl] = useState(null);
     const [liveOpen, setLiveOpen] = useState(false);
+    const [iframeKey, setIframeKey] = useState(0);
     const browserUrlRef = useRef(null);
 
     const parseStepsFromApi = (stepsData) => (stepsData || []).map((s, index) => {
@@ -301,10 +303,10 @@ const TestBuilder = () => {
                             setRunning(false);
                             setResult({ ...data, isLive: false });
                             return;
-                        } else if (data.logs !== undefined || data.snapshots !== undefined || data.liveView !== undefined) {
+                        } else if (data.logs !== undefined || data.snapshots !== undefined || data.liveView !== undefined || data.networkHistory !== undefined) {
                             setResult(prev => {
                                 const nextLogs = data.logs ?? prev?.logs ?? '';
-                                const nextNet = data.networkHistory ?? prev?.networkHistory ?? [];
+                                const nextNet = Array.isArray(data.networkHistory) ? data.networkHistory : (prev?.networkHistory ?? []);
                                 if (prev?.logs === nextLogs && prev?.isLive &&
                                     (prev?.networkHistory?.length || 0) === nextNet.length) return prev;
                                 return {
@@ -350,12 +352,15 @@ const TestBuilder = () => {
 
     const closeLiveSession = async () => {
         setRunning(false);
-        // Ask the live iframe to wipe site data before we navigate away
+        try {
+            await apiFetch(`/api/tests/${testId}/stop-live`, { method: 'POST' });
+        } catch (_) { /* ignore */ }
         try {
             const iframe = document.querySelector('iframe[title="Test Browser"]');
             iframe?.contentWindow?.postMessage('CLEAR_TEST_SESSION', '*');
         } catch (_) { /* cross-origin safe */ }
         await new Promise((r) => setTimeout(r, 300));
+        setIframeKey(Date.now());
         setBrowserUrl(apiUrl(`/api/clear-session?full=1&t=${Date.now()}`));
         await new Promise((r) => setTimeout(r, 1000));
         setBrowserUrl('about:blank');
@@ -363,6 +368,7 @@ const TestBuilder = () => {
         setLiveOpen(false);
         setBrowserUrl(null);
         browserUrlRef.current = null;
+        setResult(null);
     };
 
     const handleRun = async () => {
@@ -372,25 +378,31 @@ const TestBuilder = () => {
             return;
         }
 
+        try {
+            await apiFetch(`/api/tests/${testId}/stop-live`, { method: 'POST' });
+        } catch (_) { /* ignore */ }
+
+        const runId = Date.now();
+        setIframeKey(runId);
         setRunning(true);
         setLiveOpen(true);
-        setResult({ logs: `🚀 Starting test — loading ${startUrl}…`, isLive: true });
+        setResult({ logs: '🚀 Starting fresh test run…', networkHistory: [], isLive: true, finished: false });
 
         try {
-            // Clear any leftover login session from previous runs in the iframe origin
-            setBrowserUrl(apiUrl(`/api/clear-session?full=1&t=${Date.now()}`));
+            setBrowserUrl(apiUrl(`/api/clear-session?full=1&t=${runId}`));
             await new Promise((r) => setTimeout(r, 600));
 
-            // Always persist current builder steps before run — otherwise DB still has old project steps/URLs
-            await saveTest(true);
+            const saved = await saveTest(true);
+            if (!saved) {
+                setRunning(false);
+                return;
+            }
 
-            const runId = Date.now();
             const proxyUrl = apiUrl(`/api/proxy?url=${encodeURIComponent(startUrl)}&testId=${testId}&runId=${runId}&fresh=1`);
             browserUrlRef.current = proxyUrl;
             setBrowserUrl(proxyUrl);
             setTest((prev) => prev ? { ...prev, websiteUrl: startUrl } : prev);
 
-            // Live mode: only the in-app browser runs steps (no Puppeteer = faster, no flicker)
             await apiFetch(`/api/tests/${testId}/run`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -764,7 +776,7 @@ const TestBuilder = () => {
                         <div style={{ flex: 1, display: 'flex', overflow: 'hidden', background: '#000' }}>
                             {/* Live proxied browser — fills the whole left area */}
                             <div style={{ flex: 1, display: 'flex', flexDirection: 'column', borderRight: '1px solid rgba(255,255,255,0.1)', minWidth: 0 }}>
-                                <LiveBrowserFrame src={browserUrl} />
+                                <LiveBrowserFrame src={browserUrl} frameKey={iframeKey} />
                             </div>
 
                             {/* Execution Logs — compact right panel */}
