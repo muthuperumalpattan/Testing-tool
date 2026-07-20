@@ -394,16 +394,26 @@ app.patch('/api/tests/:id/status', async (req, res) => {
 });
 
 app.post('/api/tests/:id/steps', async (req, res) => {
-    const { steps } = req.body; // Array of steps
-    await getPool().query('DELETE FROM test_steps WHERE "testCaseId" = $1', [req.params.id]);
-    
-    for (let i = 0; i < steps.length; i++) {
-        await getPool().query(
-            'INSERT INTO test_steps ("testCaseId", "stepOrder", type, payload) VALUES ($1, $2, $3, $4)',
-            [req.params.id, i + 1, steps[i].type, JSON.stringify(steps[i].payload)]
-        );
+    try {
+        const { steps } = req.body || {};
+        if (!Array.isArray(steps)) {
+            return res.status(400).json({ error: 'steps must be an array' });
+        }
+
+        await getPool().query('DELETE FROM test_steps WHERE "testCaseId" = $1', [req.params.id]);
+
+        for (let i = 0; i < steps.length; i++) {
+            const payload = JSON.stringify(steps[i].payload ?? {});
+            await getPool().query(
+                'INSERT INTO test_steps ("testCaseId", "stepOrder", type, payload) VALUES ($1, $2, $3, $4)',
+                [req.params.id, i + 1, steps[i].type, payload]
+            );
+        }
+        res.json({ success: true });
+    } catch (error) {
+        console.error('Save steps error:', error);
+        res.status(500).json({ error: 'Failed to save steps', details: error.message });
     }
-    res.json({ success: true });
 });
 
 // Execution Routes

@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, memo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Save, Play, Plus, Trash2, ArrowLeft, Terminal, Layout, MoveUp, MoveDown, CheckCircle, Activity, GripVertical, Upload } from 'lucide-react';
 import config from '../config';
+import { apiFetch } from '../api';
 import { useToast } from '../components/ToastProvider';
 import SelectControl from '../components/SelectControl';
 import { ButtonSpinner, BuilderSkeleton } from '../components/Loading';
@@ -160,12 +161,15 @@ const TestBuilder = () => {
     const saveTest = async (quiet = false) => {
         setSaving(true);
         try {
-            const res = await fetch(`${API_BASE_URL}/api/tests/${testId}/steps`, {
+            const res = await apiFetch(`/api/tests/${testId}/steps`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ steps })
             });
-            if (!res.ok) throw new Error('Failed to save steps');
+            if (!res.ok) {
+                const data = await res.json().catch(() => ({}));
+                throw new Error(data.error || data.details || 'Failed to save steps');
+            }
             setDirty(false);
             if (!quiet) toast.success('Test saved successfully');
             return true;
